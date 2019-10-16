@@ -8,7 +8,7 @@
 #include <arpa/inet.h>
 
 #define PORT "3711"
-#define MAXDATASIZE 5
+#define MAXDATASIZE 100
 
 void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {

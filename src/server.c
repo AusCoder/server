@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include "handler.h"
 
 #define PORT "3711"
 #define BACKLOG 10
@@ -26,14 +27,73 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6 *)sa)->sin6_addr);
 }
 
-int main(int argc, char *argv[]) {
-    int sockfd, new_fd, status;
-    struct addrinfo hints, *servinfo, *p;
+void single_process_server(int sockfd) {
+    int new_fd;
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
+    char client_addr_str[INET6_ADDRSTRLEN];
+
+    while (1) {
+        sin_size = sizeof(client_addr);
+        new_fd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
+        if (new_fd < 0) {
+            perror("accept");
+            continue;
+        }
+
+        inet_ntop(
+            client_addr.ss_family,
+            get_in_addr((struct sockaddr *) &client_addr),
+            client_addr_str,
+            sizeof(client_addr_str)
+        );
+        printf("server: got connection from %s\n", client_addr_str);
+        if (handle(new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
+            perror("handler");
+        }
+        close(new_fd);
+    }
+}
+
+void fork_server(int sockfd) {
+    int new_fd;
+    struct sockaddr_storage client_addr;
+    socklen_t sin_size;
+    char client_addr_str[INET6_ADDRSTRLEN];
+
+    while (1) {
+        sin_size = sizeof(client_addr);
+        new_fd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
+        if (new_fd < 0) {
+            perror("accept");
+            continue;
+        }
+
+        inet_ntop(
+            client_addr.ss_family,
+            get_in_addr((struct sockaddr *) &client_addr),
+            client_addr_str,
+            sizeof(client_addr_str)
+        );
+        printf("server: got connection from %s\n", client_addr_str);
+
+        if (!fork()) { // the child process
+            close(sockfd);
+            if (handle(new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
+                perror("handler");
+            }
+            close(new_fd);
+            exit(0);
+        }
+        close(new_fd);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    int sockfd, status;
+    struct addrinfo hints, *servinfo, *p;
     struct sigaction sa;
     int yes = 1;
-    char client_addr_str[INET6_ADDRSTRLEN];
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -87,33 +147,6 @@ int main(int argc, char *argv[]) {
     }
 
     printf("server: waiting for connections\n");
-
-    while (1) {
-        sin_size = sizeof(client_addr);
-        new_fd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
-        if (new_fd < 0) {
-            perror("accept");
-            continue;
-        }
-
-        inet_ntop(
-            client_addr.ss_family,
-            get_in_addr((struct sockaddr *) &client_addr),
-            client_addr_str,
-            sizeof(client_addr_str)
-        );
-        printf("server: got connection from %s\n", client_addr_str);
-
-        if (!fork()) { // the child process
-            close(sockfd);
-            if (send(new_fd, "Hello, world!", 13, 0) < 0) {
-                perror("send");
-            }
-            close(new_fd);
-            exit(0);
-        }
-        close(new_fd);
-    }
-
+    single_process_server(sockfd);
     return 0;
 }
