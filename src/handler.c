@@ -1,8 +1,13 @@
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "handler.h"
 
 #define BUFSIZE 512
+#define SENDBUFSIZE 1024
 
 int parseHttpRequest(char *content, ssize_t content_len, Request *req) {
     // TODO: how to handle content spread across buffers?
@@ -22,64 +27,59 @@ int parseHttpRequest(char *content, ssize_t content_len, Request *req) {
     } else if (strcmp(STR_HTTP11, component) == 0) {
         req->httpv = HTTPV11;
     } else {
-        return -2;  // need error enum
+        return -2;
     }
     printf("method: %d. uri: %s. http version: %d\n", req->method, req->uri, req->httpv);
     return 0;
 }
 
-int formatHttpHeaders(char *buf, size_t buflen) {
-    int len;
-
-    // len = STR_HTTP10_LEN + CRLF_LEN + CRLF_LEN;
-    len = 0;
-    if (len > buflen) {
-        return -1;
-    }
-
+void formatHttpHeaders(char *buf, size_t buflen, size_t contentlen) {
     strcpy(buf, STR_HTTP10);
-    buf += STR_HTTP10_LEN;
-    // *buf++ = ' ';
-    // *buf++ = '\0';
-    strcpy(buf, STR_STATUS_200);
-    buf += STR_STATUS_200_LEN;
-    // strcpy(buf, CRLF);
-    // buf += CRLF_LEN;
-    // strcpy(buf, CRLF);
-    // buf += CRLF_LEN;
-    return len;
+    strcat(buf, " ");
+    strcat(buf, STR_STATUS_200);
+    strcat(buf, " ");
+    strcat(buf, STR_STATUS_OK);
+    strcat(buf, STR_CRLF);
+    strcat(buf, STR_H_CONTENT_LEN);
+    sprintf(buf + strlen(buf), "%ld", contentlen);
+    strcat(buf, STR_CRLF);
+    strcat(buf, STR_CRLF);
 }
 
-int sendFile(int sockfd, const char *uri) {
-    FILE *fd;
-    int numbytes;
-    char buf[BUFSIZE];
-    // Q: Is this really the best way to handle variable size buffers?
-    char filepath[strlen(WEB_ROOT) + strlen(uri)];
-
-    strcpy(filepath, WEB_ROOT);
-    strcat(filepath, uri);
-    // Q: is it possible to send direct from the file to socket?
-    fd = fopen(filepath, "r");
-    if (fd == NULL) {
-        perror("fopen");
-        return -1;
+ssize_t fileSize(int fd) {
+    struct stat s;
+    if (fstat(fd, &s) < 0) {
+        fprintf(stderr, "shit, gotta fix this\n");
     }
-    // read might be easier to use than fread
-    // it might have better error handling
-    do {
-        numbytes = fread(buf, sizeof(char), BUFSIZE, fd);
-        printf("read %u bytes from %s\n", numbytes, filepath);
-    } while (numbytes > 0);
-    // TODO check for error or eof using ferror and feof
-    return 0;
+    return s.st_size;
+}
+
+int sendFile(int sockfd, int filefd, char *filepath, const char *uri) {
+    int numbytes;
+    char buf[SENDBUFSIZE];
+
+    while (1) {
+        numbytes = read(filefd, buf, SENDBUFSIZE);
+        if (numbytes < 0) {
+            perror("read");
+            return -1;
+        }
+        if (numbytes == 0) {
+            return 0;
+        }
+        if (send(sockfd, buf, numbytes, 0) < 0) {
+            perror("send");
+            return -1;
+        }
+        printf("read and sent %u bytes from %s\n", numbytes, filepath);
+    }
 }
 
 int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
     Request req;
-    ssize_t numbytes;
-    int headerLen;
-    char recvBuf[BUFSIZE], headerBuf[BUFSIZE];
+    ssize_t numbytes, sendFileSize;
+    int fd;
+    char recvBuf[BUFSIZE], headerBuf[BUFSIZE], filepath[BUFSIZE];
 
     numbytes = recv(sockfd, recvBuf, BUFSIZE - 1, 0);
     if (numbytes < 0) {
@@ -93,26 +93,38 @@ int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
         fprintf(stderr, "request too large\n");
         return 0;
     }
-    // printf("received: %ld bytes\n%s\n", numbytes, buf);
-    if (numbytes == 0) { // I don't think this is right
+    if (numbytes == 0) { // I don't think this is right?
         printf("connection closed by client\n");
         return 0;
     }
+
+    // Parse request
     if (parseHttpRequest(recvBuf, numbytes, &req) < 0) {
         fprintf(stderr, "failed to parse request. TODO: render error num\n");
         return 0;
     }
-    headerLen = formatHttpHeaders(headerBuf, BUFSIZE);
-    printf("headers: %s\n", headerBuf);
-    if (headerLen < 0) {
-        fprintf(stderr, "failed to format headers\n");
+    if (strlen(WEB_ROOT) + strlen(req.uri) > BUFSIZE - 1) {
+        fprintf(stderr, "filepath overflow\n");
         return 0;
     }
-    if (send(sockfd, headerBuf, headerLen, 0) < 0) {
+    strcpy(filepath, WEB_ROOT);
+    strcat(filepath, req.uri);
+
+    // Open file
+    fd = open(filepath, 0);
+    if (fd < 0) {
+        perror("open");
+        return -1;
+    }
+    sendFileSize = fileSize(fd);
+
+    formatHttpHeaders(headerBuf, BUFSIZE, sendFileSize);
+    // TODO: should loop here because send might not send everything
+    if (send(sockfd, headerBuf, strlen(headerBuf), 0) < 0) {
         perror("send");
         return -1;
     }
-    if (sendFile(sockfd, req.uri) < 0) {
+    if (sendFile(sockfd, fd, filepath, req.uri) < 0) {
         fprintf(stderr, "failed to send file\n");
         return 0;
     }
