@@ -3,25 +3,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
-
-#define STR_CRLF "\r\n"
-
-#define STR_GET "GET"
-
-#define STR_HTTP10 "HTTP/1.0"
-#define STR_HTTP10_LEN 8
-#define STR_HTTP11 "HTTP/1.1"
-#define STR_HTTP11_LEN 8
-
-#define STR_STATUS_OK "OK"
-#define STR_STATUS_200 "200"
-
-#define STR_H_CONTENT_LEN "Content-Length: "
-
-#define METHOD_GET 1
-
-#define HTTPV10 0
-#define HTTPV11 1
+#include "http.h"
 
 #define WEB_ROOT "www"
 
@@ -33,10 +15,6 @@ struct _Request {
 };
 typedef struct _Request Request;
 
-int parseHttpHeaders(char *content);
-int parseHttpRequest(char *content, ssize_t content_len, Request *req);
-
-// int send_http_headers(int sockfd)
 int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size);
 
 #endif

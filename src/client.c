@@ -17,6 +17,16 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6 *)sa)->sin6_addr);
 }
 
+void formatHttpRequest(char *buf, size_t buflen, const char *uri) {
+    strcpy(buf, STR_GET);
+    strcat(buf, " ");
+    strcat(buf, uri);  // TODO: check length
+    strcat(buf, " ");
+    strcat(buf, STR_HTTP10);
+    strcat(buf, STR_CRLF);
+    strcat(buf, STR_CRLF);
+}
+
 int main(int argc, char *argv[]) {
     int sockfd, numbytes;
     char buf[MAXDATASIZE];
