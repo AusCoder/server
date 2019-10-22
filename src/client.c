@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include "http.h"
 
 #define PORT "3711"
 #define MAXDATASIZE 100

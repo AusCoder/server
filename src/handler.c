@@ -71,7 +71,6 @@ int sendFile(int sockfd, int filefd, char *filepath, const char *uri) {
             perror("send");
             return -1;
         }
-        printf("read and sent %u bytes from %s\n", numbytes, filepath);
     }
 }
 
@@ -79,7 +78,7 @@ int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
     Request req;
     ssize_t numbytes, sendFileSize;
     int fd;
-    char recvBuf[BUFSIZE], headerBuf[BUFSIZE], filepath[BUFSIZE];
+    char client_addr_str[INET6_ADDRSTRLEN], recvBuf[BUFSIZE], headerBuf[BUFSIZE], filepath[BUFSIZE];
 
     numbytes = recv(sockfd, recvBuf, BUFSIZE - 1, 0);
     if (numbytes < 0) {
@@ -97,6 +96,8 @@ int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
         printf("connection closed by client\n");
         return 0;
     }
+
+    printf("server: got connection from %s\n", client_addr_str);
 
     // Parse request
     if (parseHttpRequest(recvBuf, numbytes, &req) < 0) {
