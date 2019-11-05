@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include "handler.h"
 
 #define BUFSIZE 512
@@ -115,6 +116,7 @@ int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
     fd = open(filepath, 0);
     if (fd < 0) {
         perror("open");
+        close(fd);
         return -1;
     }
     sendFileSize = fileSize(fd);
@@ -123,12 +125,15 @@ int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
     // TODO: should loop here because send might not send everything
     if (send(sockfd, headerBuf, strlen(headerBuf), 0) < 0) {
         perror("send");
+        close(fd);
         return -1;
     }
     if (sendFile(sockfd, fd, filepath, req.uri) < 0) {
         fprintf(stderr, "failed to send file\n");
+        close(fd);
         return 0;
     }
+    close(fd);
 
     return 0;
 }

@@ -146,7 +146,8 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    printf("server: waiting for connections\n");
-    single_process_server(sockfd);
+    printf("server: waiting for connections on port %s\n", PORT);
+    // single_process_server(sockfd);
+    fork_server(sockfd);
     return 0;
 }
