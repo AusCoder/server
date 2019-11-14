@@ -10,6 +10,13 @@
 #define BUFSIZE 512
 #define SENDBUFSIZE 1024
 
+void *get_in_addr(struct sockaddr *sa) {
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in *)sa)->sin_addr);
+    }
+    return &(((struct sockaddr_in6 *)sa)->sin6_addr);
+}
+
 int parseHttpRequest(char *content, ssize_t content_len, Request *req) {
     // TODO: how to handle content spread across buffers?
     // Simple solution for now is to just increase the buffer size
@@ -34,17 +41,14 @@ int parseHttpRequest(char *content, ssize_t content_len, Request *req) {
     return 0;
 }
 
+// Q: why can't I put an inline here?
 void formatHttpHeaders(char *buf, size_t buflen, size_t contentlen) {
-    strcpy(buf, STR_HTTP10);
-    strcat(buf, " ");
-    strcat(buf, STR_STATUS_200);
-    strcat(buf, " ");
-    strcat(buf, STR_STATUS_OK);
-    strcat(buf, STR_CRLF);
-    strcat(buf, STR_H_CONTENT_LEN);
-    sprintf(buf + strlen(buf), "%ld", contentlen);
-    strcat(buf, STR_CRLF);
-    strcat(buf, STR_CRLF);
+    sprintf(
+        buf,
+        "%s %s %s\r\n%s: %ld\r\n\r\n",
+        STR_HTTP10, STR_STATUS_200, STR_STATUS_OK,
+        STR_H_CONTENT_LEN, contentlen
+    );
 }
 
 ssize_t fileSize(int fd) {
@@ -75,11 +79,45 @@ int sendFile(int sockfd, int filefd, char *filepath, const char *uri) {
     }
 }
 
-int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
+int handleStats(Stats *stats, int sockfd) {
+    size_t contentLen;
+    char contentBuf[BUFSIZE], headerBuf[BUFSIZE];
+
+    sprintf(
+        contentBuf,
+        "Server Statistics\n\nRequests: %d\n\n2xx: %d\n3xx: %d\n4xx: %d\n5xx: %d\n",
+        stats->reqs, stats->r2xx, stats->r3xx, stats->r4xx, stats->r5xx
+    );
+    contentLen = strlen(contentBuf);
+
+    formatHttpHeaders(headerBuf, BUFSIZE, contentLen);
+
+    if (send(sockfd, headerBuf, strlen(headerBuf), 0) < 0) {
+        perror("send");
+        return -1;
+    }
+    if (send(sockfd, contentBuf, contentLen, 0) < 0) {
+        perror("send");
+        return -1;
+    }
+    stats->r2xx++;
+    return 0;
+}
+
+int handle(Stats *stats, int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
     Request req;
     ssize_t numbytes, sendFileSize;
     int fd;
     char client_addr_str[INET6_ADDRSTRLEN], recvBuf[BUFSIZE], headerBuf[BUFSIZE], filepath[BUFSIZE];
+
+    inet_ntop(
+        client_addr->sa_family,
+        get_in_addr(client_addr),
+        client_addr_str,
+        sizeof(client_addr_str)
+    );
+    printf("server: got connection from %s\n", client_addr_str);
+    stats->reqs++;
 
     numbytes = recv(sockfd, recvBuf, BUFSIZE - 1, 0);
     if (numbytes < 0) {
@@ -98,17 +136,23 @@ int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
         return 0;
     }
 
-    printf("server: got connection from %s\n", client_addr_str);
-
     // Parse request
     if (parseHttpRequest(recvBuf, numbytes, &req) < 0) {
         fprintf(stderr, "failed to parse request. TODO: render error num\n");
         return 0;
     }
+
+    // Serve statitics
+    if (strcmp(req.uri, STATS_URL) == 0) {
+        return handleStats(stats, sockfd);
+    }
+
+    // Serve file
     if (strlen(WEB_ROOT) + strlen(req.uri) > BUFSIZE - 1) {
         fprintf(stderr, "filepath overflow\n");
         return 0;
     }
+
     strcpy(filepath, WEB_ROOT);
     strcat(filepath, req.uri);
 
@@ -134,6 +178,7 @@ int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
         return 0;
     }
     close(fd);
+    stats->r2xx++;
 
     return 0;
 }

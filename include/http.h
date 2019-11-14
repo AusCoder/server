@@ -13,8 +13,8 @@
 #define STR_STATUS_OK "OK"
 #define STR_STATUS_200 "200"
 
-#define STR_H_CONTENT_LEN "Content-Length: "
-#define STR_H_ACCEPT "Accept: "
+#define STR_H_CONTENT_LEN "Content-Length"
+// #define STR_H_ACCEPT "Accept"
 
 #define METHOD_GET 1
 

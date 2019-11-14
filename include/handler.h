@@ -6,6 +6,11 @@
 #include "http.h"
 
 #define WEB_ROOT "www"
+#define STATS_URL "/statistics"
+
+typedef struct _Request Request;
+
+typedef struct _Stats Stats;
 
 // Q: how to enum in C?
 struct _Request {
@@ -13,9 +18,16 @@ struct _Request {
     char *uri;
     int httpv;
 };
-typedef struct _Request Request;
 
-int handle(int sockfd, struct sockaddr *client_addr, socklen_t addr_size);
+struct _Stats {
+    int reqs;
+    int r2xx;
+    int r3xx;
+    int r4xx;
+    int r5xx;
+};
+
+int handle(Stats *stats, int sockfd, struct sockaddr *client_addr, socklen_t addr_size);
 
 #endif
 

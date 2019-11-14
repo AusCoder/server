@@ -8,7 +8,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
-#include <arpa/inet.h>
 #include "handler.h"
 
 #define PORT "3711"
@@ -20,18 +19,12 @@ void sigchld_handler(int s) {
     errno = saved_errno;
 }
 
-void *get_in_addr(struct sockaddr *sa) {
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in *)sa)->sin_addr);
-    }
-    return &(((struct sockaddr_in6 *)sa)->sin6_addr);
-}
-
 void single_process_server(int sockfd) {
     int new_fd;
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
-    char client_addr_str[INET6_ADDRSTRLEN];
+    Stats stats;
+    memset(&stats, 0, sizeof(stats));
 
     while (1) {
         sin_size = sizeof(client_addr);
@@ -41,14 +34,7 @@ void single_process_server(int sockfd) {
             continue;
         }
 
-        inet_ntop(
-            client_addr.ss_family,
-            get_in_addr((struct sockaddr *) &client_addr),
-            client_addr_str,
-            sizeof(client_addr_str)
-        );
-        printf("server: got connection from %s\n", client_addr_str);
-        if (handle(new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
+        if (handle(&stats, new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
             perror("handler");
         }
         close(new_fd);
@@ -59,7 +45,10 @@ void fork_server(int sockfd) {
     int new_fd;
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
-    char client_addr_str[INET6_ADDRSTRLEN];
+
+    // TODO: This needs to live in an mmap'd region
+    Stats stats;
+    memset(&stats, 0, sizeof(stats));
 
     while (1) {
         sin_size = sizeof(client_addr);
@@ -69,17 +58,9 @@ void fork_server(int sockfd) {
             continue;
         }
 
-        inet_ntop(
-            client_addr.ss_family,
-            get_in_addr((struct sockaddr *) &client_addr),
-            client_addr_str,
-            sizeof(client_addr_str)
-        );
-        printf("server: got connection from %s\n", client_addr_str);
-
         if (!fork()) { // the child process
             close(sockfd);
-            if (handle(new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
+            if (handle(&stats, new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
                 perror("handler");
             }
             close(new_fd);
@@ -147,7 +128,7 @@ int main(int argc, char *argv[]) {
     }
 
     printf("server: waiting for connections on port %s\n", PORT);
-    // single_process_server(sockfd);
-    fork_server(sockfd);
+    single_process_server(sockfd);
+    // fork_server(sockfd);
     return 0;
 }

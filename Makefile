@@ -1,6 +1,6 @@
 CC = gcc
 CPPFLAGS = -Iinclude
-CFLAGS = -g -Wall
+CFLAGS = -g -Wall  # -std=c99  # TODO
 LDLIBS =
 LDFLAGS =
 
