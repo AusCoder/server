@@ -4,3 +4,5 @@ hostname
 showip
 obj
 out.jpg
+test.jpg
+*.log

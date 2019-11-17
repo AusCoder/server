@@ -7,6 +7,8 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/mman.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include "handler.h"
 
@@ -42,31 +44,48 @@ void single_process_server(int sockfd) {
 }
 
 void fork_server(int sockfd) {
-    int new_fd;
+    int newsockfd, zerofd;
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
+    Stats *stats;
 
-    // TODO: This needs to live in an mmap'd region
-    Stats stats;
-    memset(&stats, 0, sizeof(stats));
+    // memory mapped without a backing file
+    stats = (Stats *)mmap((void *)-1, sizeof(Stats), PROT_READ | PROT_WRITE,
+        MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (stats == MAP_FAILED) {
+        perror("mmap");
+        return;
+    }
+    // memory mapped backed with /dev/zero
+    // if ((zerofd = open("/dev/zero", O_RDWR)) < 0) {
+    //     perror("open");
+    //     return;
+    // }
+    // stats = (Stats *)mmap(0, sizeof(Stats), PROT_READ | PROT_WRITE,
+    //     MAP_SHARED, zerofd, 0);
+    // if (stats == MAP_FAILED) {
+    //     perror("mmap");
+    //     return;
+    // }
+    // close(zerofd);
 
     while (1) {
         sin_size = sizeof(client_addr);
-        new_fd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
-        if (new_fd < 0) {
+        newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
+        if (newsockfd < 0) {
             perror("accept");
             continue;
         }
 
         if (!fork()) { // the child process
             close(sockfd);
-            if (handle(&stats, new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
+            if (handle(stats, newsockfd, (struct sockaddr *) &client_addr, sin_size) < 0) {
                 perror("handler");
             }
-            close(new_fd);
+            close(newsockfd);
             exit(0);
         }
-        close(new_fd);
+        close(newsockfd);
     }
 }
 
@@ -128,7 +147,7 @@ int main(int argc, char *argv[]) {
     }
 
     printf("server: waiting for connections on port %s\n", PORT);
-    single_process_server(sockfd);
-    // fork_server(sockfd);
+    // single_process_server(sockfd);
+    fork_server(sockfd);
     return 0;
 }

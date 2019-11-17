@@ -104,11 +104,50 @@ int handleStats(Stats *stats, int sockfd) {
     return 0;
 }
 
+int handleFile(Stats *stats, int sockfd, Request *req) {
+    int fd;
+    ssize_t sendFileSize;
+    char headerBuf[BUFSIZE], filepath[BUFSIZE];
+
+    if (strlen(WEB_ROOT) + strlen(req->uri) > BUFSIZE - 1) {
+        fprintf(stderr, "filepath overflow\n");
+        return 0;
+    }
+
+    strcpy(filepath, WEB_ROOT);
+    strcat(filepath, req->uri);
+
+    // Open file
+    fd = open(filepath, 0);
+    if (fd < 0) {
+        perror("open");
+        close(fd);
+        return -1;
+    }
+    sendFileSize = fileSize(fd);
+
+    formatHttpHeaders(headerBuf, BUFSIZE, sendFileSize);
+    // TODO: should loop here because send might not send everything
+    if (send(sockfd, headerBuf, strlen(headerBuf), 0) < 0) {
+        perror("send");
+        close(fd);
+        return -1;
+    }
+    if (sendFile(sockfd, fd, filepath, req->uri) < 0) {
+        fprintf(stderr, "failed to send file\n");
+        close(fd);
+        return 0;
+    }
+    close(fd);
+    stats->r2xx++;
+
+    return 0;
+}
+
 int handle(Stats *stats, int sockfd, struct sockaddr *client_addr, socklen_t addr_size) {
     Request req;
-    ssize_t numbytes, sendFileSize;
-    int fd;
-    char client_addr_str[INET6_ADDRSTRLEN], recvBuf[BUFSIZE], headerBuf[BUFSIZE], filepath[BUFSIZE];
+    ssize_t numbytes;
+    char client_addr_str[INET6_ADDRSTRLEN], recvBuf[BUFSIZE];
 
     inet_ntop(
         client_addr->sa_family,
@@ -146,39 +185,5 @@ int handle(Stats *stats, int sockfd, struct sockaddr *client_addr, socklen_t add
     if (strcmp(req.uri, STATS_URL) == 0) {
         return handleStats(stats, sockfd);
     }
-
-    // Serve file
-    if (strlen(WEB_ROOT) + strlen(req.uri) > BUFSIZE - 1) {
-        fprintf(stderr, "filepath overflow\n");
-        return 0;
-    }
-
-    strcpy(filepath, WEB_ROOT);
-    strcat(filepath, req.uri);
-
-    // Open file
-    fd = open(filepath, 0);
-    if (fd < 0) {
-        perror("open");
-        close(fd);
-        return -1;
-    }
-    sendFileSize = fileSize(fd);
-
-    formatHttpHeaders(headerBuf, BUFSIZE, sendFileSize);
-    // TODO: should loop here because send might not send everything
-    if (send(sockfd, headerBuf, strlen(headerBuf), 0) < 0) {
-        perror("send");
-        close(fd);
-        return -1;
-    }
-    if (sendFile(sockfd, fd, filepath, req.uri) < 0) {
-        fprintf(stderr, "failed to send file\n");
-        close(fd);
-        return 0;
-    }
-    close(fd);
-    stats->r2xx++;
-
-    return 0;
+    return handleFile(stats,  sockfd, &req);
 }
