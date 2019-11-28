@@ -1,7 +1,7 @@
 CC = gcc
 CPPFLAGS = -Iinclude
 CFLAGS = -g -Wall  # -std=c99  # TODO
-LDLIBS =
+LDLIBS = -pthread
 LDFLAGS =
 
 all: server client showip

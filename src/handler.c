@@ -17,9 +17,38 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6 *)sa)->sin6_addr);
 }
 
+int stats_inc(Stats *stats, StatsMod mod) {
+    if ((stats->lock != STATS_NO_LOCK) && (sem_wait(stats->lock)) < 0) {
+        return -1;
+    }
+    switch (mod) {
+        case SM_INC_REQ:
+            stats->reqs++;
+            break;
+        case SM_INC_2XX:
+            stats->r2xx++;
+            break;
+        case SM_INC_3XX:
+            stats->r3xx++;
+            break;
+        case SM_INC_4XX:
+            stats->r4xx++;
+            break;
+        case SM_INC_5XX:
+            stats->r5xx++;
+            break;
+        default:
+            break;
+    }
+    if ((stats->lock != STATS_NO_LOCK) && (sem_post(stats->lock) < 0)) {
+        return -1;
+    }
+    return 0;
+}
+
+// How to handle content spread across buffers?
+// Simple solution for now is to just increase the buffer size
 int parseHttpRequest(char *content, ssize_t content_len, Request *req) {
-    // TODO: how to handle content spread across buffers?
-    // Simple solution for now is to just increase the buffer size
     char *component;
 
     component = strsep(&content, " ");
@@ -59,8 +88,22 @@ ssize_t fileSize(int fd) {
     return s.st_size;
 }
 
+int sendAll(int sockfd, char *buf, ssize_t bytes_to_send) {
+    ssize_t ret;
+    ssize_t bytes_sent = 0;
+    while (bytes_sent < bytes_to_send) {
+        ret = send(sockfd, buf, bytes_to_send, 0);
+        if (ret < 0) {
+            perror("send");
+            return -1;
+        }
+        bytes_sent += ret;
+    }
+    return 0;
+}
+
 int sendFile(int sockfd, int filefd, char *filepath, const char *uri) {
-    int numbytes;
+    ssize_t numbytes;
     char buf[SENDBUFSIZE];
 
     while (1) {
@@ -72,8 +115,7 @@ int sendFile(int sockfd, int filefd, char *filepath, const char *uri) {
         if (numbytes == 0) {
             return 0;
         }
-        if (send(sockfd, buf, numbytes, 0) < 0) {
-            perror("send");
+        if (sendAll(sockfd, buf, numbytes) < 0) {
             return -1;
         }
     }
@@ -100,7 +142,11 @@ int handleStats(Stats *stats, int sockfd) {
         perror("send");
         return -1;
     }
-    stats->r2xx++;
+    if (stats_inc(stats, SM_INC_2XX) < 0) {
+        perror("stats_inc");
+        return -1;
+    }
+    // stats->r2xx++;
     return 0;
 }
 
@@ -139,8 +185,11 @@ int handleFile(Stats *stats, int sockfd, Request *req) {
         return 0;
     }
     close(fd);
-    stats->r2xx++;
-
+    if (stats_inc(stats, SM_INC_2XX) < 0) {
+        perror("stats_inc");
+        return -1;
+    }
+    // stats->r2xx++;
     return 0;
 }
 
@@ -155,8 +204,14 @@ int handle(Stats *stats, int sockfd, struct sockaddr *client_addr, socklen_t add
         client_addr_str,
         sizeof(client_addr_str)
     );
+    // TODO: Try without printing all these logs and see if
+    //  I am getting requests that aren't processed somewhere
+    // (Trying to track down why num requests greater than expected)
     printf("server: got connection from %s\n", client_addr_str);
-    stats->reqs++;
+    if (stats_inc(stats, SM_INC_REQ) < 0) {
+        perror("stats_inc");
+        return -1;
+    }
 
     numbytes = recv(sockfd, recvBuf, BUFSIZE - 1, 0);
     if (numbytes < 0) {

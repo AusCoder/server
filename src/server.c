@@ -9,16 +9,38 @@
 #include <sys/socket.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <semaphore.h>
 #include <netdb.h>
 #include "handler.h"
 
 #define PORT "3711"
 #define BACKLOG 10
+#define SEM_NAME "server"
+
+Stats *stats_ipc = NULL;
+
+void cleanup() {
+    if ((stats_ipc != NULL) && (stats_ipc->lock != STATS_NO_LOCK)) {
+        printf("closing sem\n");
+        if (sem_close(stats_ipc->lock) < 0) {
+            perror("sem_close");
+        }
+        if (sem_unlink(SEM_NAME) < 0) {
+            perror("sem_unlink");
+        }
+        stats_ipc->lock = STATS_NO_LOCK;
+    }
+    exit(130);
+}
 
 void sigchld_handler(int s) {
     int saved_errno = errno;
     while (waitpid(-1, NULL, WNOHANG) > 0);
     errno = saved_errno;
+}
+
+void sigint_handler(int s) {
+    cleanup();
 }
 
 void single_process_server(int sockfd) {
@@ -27,6 +49,7 @@ void single_process_server(int sockfd) {
     socklen_t sin_size;
     Stats stats;
     memset(&stats, 0, sizeof(stats));
+    stats.lock = STATS_NO_LOCK;
 
     while (1) {
         sin_size = sizeof(client_addr);
@@ -44,30 +67,39 @@ void single_process_server(int sockfd) {
 }
 
 void fork_server(int sockfd) {
-    int newsockfd, zerofd;
+    int newsockfd;
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
-    Stats *stats;
 
     // memory mapped without a backing file
-    stats = (Stats *)mmap((void *)-1, sizeof(Stats), PROT_READ | PROT_WRITE,
+    stats_ipc = (Stats *)mmap((void *)-1, sizeof(Stats), PROT_READ | PROT_WRITE,
         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    if (stats == MAP_FAILED) {
+    if (stats_ipc == MAP_FAILED) {
         perror("mmap");
         return;
     }
+    memset(stats_ipc, 0, sizeof(Stats));
+
     // memory mapped backed with /dev/zero
     // if ((zerofd = open("/dev/zero", O_RDWR)) < 0) {
     //     perror("open");
     //     return;
     // }
-    // stats = (Stats *)mmap(0, sizeof(Stats), PROT_READ | PROT_WRITE,
+    // stats_ipc = (Stats *)mmap(0, sizeof(Stats), PROT_READ | PROT_WRITE,
     //     MAP_SHARED, zerofd, 0);
-    // if (stats == MAP_FAILED) {
+    // if (stats_ipc == MAP_FAILED) {
     //     perror("mmap");
     //     return;
     // }
     // close(zerofd);
+
+    // semaphore to lock stats
+    stats_ipc->lock = sem_open(SEM_NAME, O_CREAT | O_EXCL, O_RDWR, 1);
+    if (stats_ipc->lock == SEM_FAILED) {
+        perror("sem_open");
+        return;
+    }
+    // stats_ipc->lock = STATS_NO_LOCK;
 
     while (1) {
         sin_size = sizeof(client_addr);
@@ -79,7 +111,7 @@ void fork_server(int sockfd) {
 
         if (!fork()) { // the child process
             close(sockfd);
-            if (handle(stats, newsockfd, (struct sockaddr *) &client_addr, sin_size) < 0) {
+            if (handle(stats_ipc, newsockfd, (struct sockaddr *) &client_addr, sin_size) < 0) {
                 perror("handler");
             }
             close(newsockfd);
@@ -92,7 +124,7 @@ void fork_server(int sockfd) {
 int main(int argc, char *argv[]) {
     int sockfd, status;
     struct addrinfo hints, *servinfo, *p;
-    struct sigaction sa;
+    struct sigaction sa_chld, sa_int;
     int yes = 1;
 
     memset(&hints, 0, sizeof(hints));
@@ -138,12 +170,23 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    sa.sa_handler = sigchld_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+    sa_chld.sa_handler = sigchld_handler;
+    sigemptyset(&sa_chld.sa_mask);
+    sa_chld.sa_flags = SA_RESTART;
+    if (sigaction(SIGCHLD, &sa_chld, NULL) < 0) {
         perror("sigaction");
         exit(1);
+    }
+
+    sa_int.sa_handler = sigint_handler;
+    sigemptyset(&sa_int.sa_mask);
+    if (sigaction(SIGINT, &sa_int, NULL) < 0) {
+        perror("sigaction");
+        exit(1);
+    }
+
+    if (atexit(cleanup) < 0) {
+        perror("atexit");
     }
 
     printf("server: waiting for connections on port %s\n", PORT);

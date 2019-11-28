@@ -4,9 +4,12 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include "http.h"
+#include <semaphore.h>
 
 #define WEB_ROOT "www"
 #define STATS_URL "/statistics"
+
+#define STATS_NO_LOCK (sem_t *)-1
 
 typedef struct _Request Request;
 
@@ -25,7 +28,13 @@ struct _Stats {
     int r3xx;
     int r4xx;
     int r5xx;
+
+    sem_t *lock;
 };
+
+typedef enum {
+    SM_INC_REQ, SM_INC_2XX, SM_INC_3XX, SM_INC_4XX, SM_INC_5XX
+} StatsMod;
 
 int handle(Stats *stats, int sockfd, struct sockaddr *client_addr, socklen_t addr_size);
 
