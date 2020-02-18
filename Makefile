@@ -1,6 +1,6 @@
 CC = gcc
 CPPFLAGS = -Iinclude
-CFLAGS = -g -Wall  # -std=c99  # TODO
+CFLAGS = -g -Wall -std=gnu99
 LDLIBS = -pthread
 LDFLAGS =
 

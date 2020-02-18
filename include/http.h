@@ -14,6 +14,7 @@
 #define STR_STATUS_200 "200"
 
 #define STR_H_CONTENT_LEN "Content-Length"
+#define STR_H_CONTENT_TYPE "Content-Type"
 // #define STR_H_ACCEPT "Accept"
 
 #define METHOD_GET 1

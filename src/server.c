@@ -19,6 +19,8 @@
 
 Stats *stats_ipc = NULL;
 
+// Could run with atexit, but then the child processes can
+// remove the semaphore. For now, we run it on SIGINT
 void cleanup() {
     if ((stats_ipc != NULL) && (stats_ipc->lock != STATS_NO_LOCK)) {
         printf("closing sem\n");
@@ -72,7 +74,7 @@ void fork_server(int sockfd) {
     socklen_t sin_size;
 
     // memory mapped without a backing file
-    stats_ipc = (Stats *)mmap((void *)-1, sizeof(Stats), PROT_READ | PROT_WRITE,
+    stats_ipc = (Stats *)mmap(NULL, sizeof(Stats), PROT_READ | PROT_WRITE,
         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (stats_ipc == MAP_FAILED) {
         perror("mmap");
@@ -99,7 +101,6 @@ void fork_server(int sockfd) {
         perror("sem_open");
         return;
     }
-    // stats_ipc->lock = STATS_NO_LOCK;
 
     while (1) {
         sin_size = sizeof(client_addr);
@@ -111,6 +112,7 @@ void fork_server(int sockfd) {
 
         if (!fork()) { // the child process
             close(sockfd);
+
             if (handle(stats_ipc, newsockfd, (struct sockaddr *) &client_addr, sin_size) < 0) {
                 perror("handler");
             }
@@ -180,17 +182,15 @@ int main(int argc, char *argv[]) {
 
     sa_int.sa_handler = sigint_handler;
     sigemptyset(&sa_int.sa_mask);
+    sa_int.sa_flags = 0;
     if (sigaction(SIGINT, &sa_int, NULL) < 0) {
         perror("sigaction");
         exit(1);
     }
 
-    if (atexit(cleanup) < 0) {
-        perror("atexit");
-    }
-
     printf("server: waiting for connections on port %s\n", PORT);
-    // single_process_server(sockfd);
+    // TODO: add getopt for arguments
+    //single_process_server(sockfd);
     fork_server(sockfd);
     return 0;
 }
