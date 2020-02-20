@@ -133,6 +133,7 @@ int sendAll(int sockfd, char *buf, ssize_t bytes_to_send) {
     ssize_t ret;
     ssize_t bytes_sent = 0;
     while (bytes_sent < bytes_to_send) {
+        printf("sending to socket: %d\n", sockfd);
         ret = send(sockfd, buf, bytes_to_send, 0);
         if (ret < 0) {
             perror("send");
@@ -232,14 +233,18 @@ int readDirectoryInProc(const char *dirpath, char *buf, int bufsize) {
         errno = 0;
         if ((ent = readdir(dir)) == NULL && (errno != 0)) {
             perror("readdir");
+            // TODO: check return code of closedir
+            closedir(dir);
             return -1;
         }
         if (ent == NULL) {
+            closedir(dir);
             return byteswritten; 
         }
         entNameSize = strlen(ent->d_name);
         if (entNameSize > bufsize - 2) {
             // TODO: error because buffer not big enough
+            closedir(dir);
             return 0;
         }
         strcpy(buf, ent->d_name);
@@ -383,7 +388,7 @@ int handle(Stats *stats, int sockfd, struct sockaddr *client_addr, socklen_t add
 
     numbytes = readRequestBuf(sockfd, recvBuf, BUFSIZE);
     if (numbytes < 0) {
-        fprintf(stderr, "failed to read a request buffer\n");
+        fprintf(stderr, "failed to read a request buffer from socket: %d\n", sockfd);
         return -1;
     }
 

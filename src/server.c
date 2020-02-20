@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <semaphore.h>
 #include <netdb.h>
+#include <pthread.h>
 #include "handler.h"
 
 #define PORT "3711"
@@ -18,6 +19,14 @@
 #define SEM_NAME "server"
 
 Stats *stats_ipc = NULL;
+
+struct thread_args {
+    Stats *stats;
+    int sockfd;
+    struct sockaddr_storage client_addr;
+    socklen_t addr_size;
+    pthread_t thread_id;
+};
 
 // Could run with atexit, but then the child processes can
 // remove the semaphore. For now, we run it on SIGINT
@@ -46,7 +55,7 @@ void sigint_handler(int s) {
 }
 
 void single_process_server(int sockfd) {
-    int new_fd;
+    int newsockfd;
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
     Stats stats;
@@ -55,16 +64,16 @@ void single_process_server(int sockfd) {
 
     while (1) {
         sin_size = sizeof(client_addr);
-        new_fd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
-        if (new_fd < 0) {
+        newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
+        if (newsockfd < 0) {
             perror("accept");
             continue;
         }
 
-        if (handle(&stats, new_fd, (struct sockaddr *) &client_addr, sin_size) < 0) {
+        if (handle(&stats, newsockfd, (struct sockaddr *) &client_addr, sin_size) < 0) {
             perror("handler");
         }
-        close(new_fd);
+        close(newsockfd);
     }
 }
 
@@ -120,6 +129,89 @@ void fork_server(int sockfd) {
             exit(0);
         }
         close(newsockfd);
+    }
+}
+
+void *thread_run(void *arg) {
+    struct thread_args *targs = arg;
+    int ret;
+
+    ret = handle(targs->stats, targs->sockfd, (struct sockaddr *)&targs->client_addr, targs->addr_size);
+    if (ret < 0) {
+        close(targs->sockfd);
+        perror("handle");
+        return NULL;
+    }
+    close(targs->sockfd);
+    return NULL;
+}
+
+struct thread_args *aquireThreadArgs(struct thread_args **threadArgs, int maxNumThreads) {
+    struct thread_args *targs = NULL;
+    for (int i = 0; i < maxNumThreads; i++) {
+        if (threadArgs[i] == NULL) {
+            targs = threadArgs[i] = (struct thread_args *)malloc(sizeof(struct thread_args));
+            break;
+        }
+    }
+    return targs;
+}
+
+void thread_server(int sockfd) {
+    int newsockfd, ret, maxNumThreads;
+    maxNumThreads = 20;
+    struct thread_args *threadArgs[maxNumThreads];
+    struct thread_args *targs;
+    struct sockaddr_storage client_addr;
+    socklen_t sin_size;
+    Stats stats;
+
+    memset(&stats, 0, sizeof(stats));
+    stats.lock = STATS_NO_LOCK;
+
+    for (int i = 0; i < maxNumThreads; i++) {
+        threadArgs[i] = NULL;
+    }
+
+    while (1) {
+        sin_size = sizeof(client_addr);
+        newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
+        printf("newsockfd: %d\n", newsockfd);
+        if (newsockfd < 0) {
+            perror("accept");
+            continue;
+        }
+
+        targs = aquireThreadArgs(threadArgs, maxNumThreads);
+        if (targs == NULL) {
+            // This should kill the program
+            fprintf(stderr, "Could not find free thread_args\n");
+            close(newsockfd);
+            continue;
+        }
+        targs->stats = &stats;
+        targs->sockfd = newsockfd;
+        targs->client_addr = client_addr;
+        targs->addr_size = sin_size;
+
+        // // This struct appears to be shared between the threads!
+        // // 2 threads would end up with the same newsockfd and one
+        // // thread would block on a read from a socket that had
+        // // already been read from
+        // struct thread_args targs;
+        // targs.stats = &stats;
+        // targs.sockfd = newsockfd;
+        // // Problem here!
+        // // Lets see what happens. It would be better to copy.
+        // targs.client_addr = client_addr;
+        // targs.addr_size = sin_size;
+
+        ret = pthread_create(&(targs->thread_id), NULL,
+                             thread_run, targs);
+        if (ret != 0) {
+            perror("pthread_create");
+            return;
+        }
     }
 }
 
@@ -191,6 +283,7 @@ int main(int argc, char *argv[]) {
     printf("server: waiting for connections on port %s\n", PORT);
     // TODO: add getopt for arguments
     //single_process_server(sockfd);
-    fork_server(sockfd);
+    //fork_server(sockfd);
+    thread_server(sockfd);
     return 0;
 }
