@@ -1,3 +1,4 @@
+#include "errors.h"
 #include "handler.h"
 #include <assert.h>
 #include <errno.h>
@@ -26,8 +27,8 @@ struct thread_args {
   int sockfd;
   struct sockaddr_storage client_addr;
   socklen_t addr_size;
-  int thread_idx; // internal idx used to keep track of thread_args
   pthread_t thread_id;
+  int is_finished;
 };
 
 // Could run with atexit, but then the child processes can
@@ -87,10 +88,9 @@ void fork_server(int sockfd) {
   // memory mapped without a backing file
   stats_ipc = (Stats *)mmap(NULL, sizeof(Stats), PROT_READ | PROT_WRITE,
                             MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-  if (stats_ipc == MAP_FAILED) {
-    perror("mmap");
-    return;
-  }
+  if (stats_ipc == MAP_FAILED)
+    HANDLE_ERROR_RETURN_VOID("mmap");
+
   memset(stats_ipc, 0, sizeof(Stats));
 
   // memory mapped backed with /dev/zero
@@ -108,10 +108,8 @@ void fork_server(int sockfd) {
 
   // semaphore to lock stats
   stats_ipc->lock = sem_open(SEM_NAME, O_CREAT | O_EXCL, O_RDWR, 1);
-  if (stats_ipc->lock == SEM_FAILED) {
-    perror("sem_open");
-    return;
-  }
+  if (stats_ipc->lock == SEM_FAILED)
+    HANDLE_ERROR_RETURN_VOID("sem_open");
 
   while (1) {
     sin_size = sizeof(client_addr);
@@ -147,6 +145,7 @@ void *thread_run(void *arg) {
     return NULL;
   }
   close(targs->sockfd);
+  targs->is_finished = 1;
   return NULL;
 }
 
@@ -157,25 +156,29 @@ struct thread_args *alloc_thread_args(struct thread_args **thread_args_arr,
     if (thread_args_arr[i] == NULL) {
       targs = thread_args_arr[i] =
           (struct thread_args *)malloc(sizeof(struct thread_args));
-      targs->thread_idx = i;
       break;
     }
   }
   return targs;
 }
 
-void free_thread_args(struct thread_args **thread_args_arr, int max_num_threads,
-                      struct thread_args *targs) {
-  assert(targs->thread_idx >= 0);
-  assert(targs->thread_idx < max_num_threads);
-  free(targs);
-  thread_args_arr[targs->thread_idx] = NULL;
+void free_thread_args(struct thread_args **thread_args_arr,
+                      int max_num_threads) {
+  struct thread_args *targs;
+  for (int i = 0; i < max_num_threads; i++) {
+    targs = thread_args_arr[i];
+    if (targs != NULL && targs->is_finished) {
+      pthread_join(targs->thread_id, NULL);
+      thread_args_arr[i] = NULL;
+      free(targs);
+    }
+  }
 }
 
 void thread_server(int sockfd) {
-  int newsockfd, ret, maxNumThreads;
-  maxNumThreads = 20;
-  struct thread_args *threadArgs[maxNumThreads];
+  int newsockfd, ret, max_num_threads;
+  max_num_threads = 20;
+  struct thread_args *thread_args_arr[max_num_threads];
   struct thread_args *targs;
   struct sockaddr_storage client_addr;
   socklen_t sin_size;
@@ -184,20 +187,19 @@ void thread_server(int sockfd) {
   memset(&stats, 0, sizeof(stats));
   stats.lock = STATS_NO_LOCK;
 
-  for (int i = 0; i < maxNumThreads; i++) {
-    threadArgs[i] = NULL;
+  for (int i = 0; i < max_num_threads; i++) {
+    thread_args_arr[i] = NULL;
   }
 
   while (1) {
     sin_size = sizeof(client_addr);
     newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
-    printf("newsockfd: %d\n", newsockfd);
     if (newsockfd < 0) {
       perror("accept");
       continue;
     }
 
-    targs = alloc_thread_args(threadArgs, maxNumThreads);
+    targs = alloc_thread_args(thread_args_arr, max_num_threads);
     if (targs == NULL) {
       // This should kill the program
       fprintf(stderr, "Could not find free thread_args\n");
@@ -208,6 +210,7 @@ void thread_server(int sockfd) {
     targs->sockfd = newsockfd;
     targs->client_addr = client_addr;
     targs->addr_size = sin_size;
+    targs->is_finished = 0;
 
     // // This struct appears to be shared between the threads!
     // // 2 threads would end up with the same newsockfd and one
@@ -223,9 +226,11 @@ void thread_server(int sockfd) {
 
     ret = pthread_create(&(targs->thread_id), NULL, thread_run, targs);
     if (ret != 0) {
-      perror("pthread_create");
-      return;
+      free_thread_args(thread_args_arr, max_num_threads);
+      HANDLE_ERROR_RETURN_VOID("pthread_create");
     }
+
+    free_thread_args(thread_args_arr, max_num_threads);
   }
 }
 
@@ -253,10 +258,8 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-      perror("setsockopt");
-      exit(1);
-    }
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
+      HANDLE_ERROR_EXIT("setsockopt");
 
     if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
       close(sockfd);
@@ -270,29 +273,23 @@ int main(int argc, char *argv[]) {
 
   if (p == NULL) {
     fprintf(stderr, "server: failed to bind\n");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
-  if (listen(sockfd, BACKLOG) == -1) {
-    perror("listen");
-    exit(1);
-  }
+  if (listen(sockfd, BACKLOG) == -1)
+    HANDLE_ERROR_EXIT("listen");
 
   sa_chld.sa_handler = sigchld_handler;
   sigemptyset(&sa_chld.sa_mask);
   sa_chld.sa_flags = SA_RESTART;
-  if (sigaction(SIGCHLD, &sa_chld, NULL) < 0) {
-    perror("sigaction");
-    exit(1);
-  }
+  if (sigaction(SIGCHLD, &sa_chld, NULL) < 0)
+    HANDLE_ERROR_EXIT("sigaction");
 
   sa_int.sa_handler = sigint_handler;
   sigemptyset(&sa_int.sa_mask);
   sa_int.sa_flags = 0;
-  if (sigaction(SIGINT, &sa_int, NULL) < 0) {
-    perror("sigaction");
-    exit(1);
-  }
+  if (sigaction(SIGINT, &sa_int, NULL) < 0)
+    HANDLE_ERROR_EXIT("sigaction");
 
   printf("server: waiting for connections on port %s\n", PORT);
   // TODO: add getopt for arguments

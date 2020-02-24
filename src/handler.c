@@ -120,7 +120,6 @@ int sendAll(int sockfd, char *buf, ssize_t bytes_to_send) {
   ssize_t ret;
   ssize_t bytes_sent = 0;
   while (bytes_sent < bytes_to_send) {
-    printf("sending to socket: %d\n", sockfd);
     ret = send(sockfd, buf, bytes_to_send, 0);
     if (ret < 0) {
       perror("send");
@@ -385,3 +384,4 @@ int handle(Stats *stats, int sockfd, struct sockaddr *client_addr,
          req.httpv);
   return dispatch(stats, sockfd, &req);
 }
+
