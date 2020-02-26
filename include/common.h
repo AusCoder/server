@@ -1,5 +1,5 @@
-#ifndef _ERRORS_H
-#define _ERRORS_H
+#ifndef _COMMON_H
+#define _COMMON_H
 
 #define HANDLE_ERROR_EXIT(msg)                                                 \
   do {                                                                         \

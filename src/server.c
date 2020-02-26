@@ -1,60 +1,50 @@
-#include "errors.h"
+#include "common.h"
 #include "handler.h"
-#include <assert.h>
+#include "server.h"
 #include <errno.h>
 #include <fcntl.h>
-#include <netdb.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <signal.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
-#define PORT "3711"
-#define BACKLOG 10
 #define SEM_NAME "server"
 
 Stats *stats_ipc = NULL;
 
-struct thread_args {
-  Stats *stats;
-  int sockfd;
-  struct sockaddr_storage client_addr;
-  socklen_t addr_size;
-  pthread_t thread_id;
-  int is_finished;
-};
+void read_server_args(int argc, char *const argv[], struct server_args *args) {
+  int opt;
 
-// Could run with atexit, but then the child processes can
-// remove the semaphore. For now, we run it on SIGINT
-void cleanup() {
-  if ((stats_ipc != NULL) && (stats_ipc->lock != STATS_NO_LOCK)) {
-    printf("closing sem\n");
-    if (sem_close(stats_ipc->lock) < 0) {
-      perror("sem_close");
+  args->type = ST_NONE;
+
+  while ((opt = getopt(argc, argv, "t:")) != -1) {
+    switch (opt) {
+    case 't':
+      if (strcmp(ST_ARG_SINGLE, optarg) == 0) {
+        args->type = ST_SINGLE;
+        break;
+      } else if (strcmp(ST_ARG_FORK, optarg) == 0) {
+        args->type = ST_FORK;
+        break;
+      } else if (strcmp(ST_ARG_THREAD, optarg) == 0) {
+        args->type = ST_THREAD;
+        break;
+      } else {
+        fprintf(stderr, "Invalid server type: %s\n", optarg);
+        exit(EXIT_FAILURE);
+      }
+    default:
+      fprintf(stderr, "Usage: %s [-t type]\n", argv[0]);
+      exit(EXIT_FAILURE);
     }
-    if (sem_unlink(SEM_NAME) < 0) {
-      perror("sem_unlink");
-    }
-    stats_ipc->lock = STATS_NO_LOCK;
   }
-  exit(130);
-}
 
-void sigchld_handler(int s) {
-  int saved_errno = errno;
-  while (waitpid(-1, NULL, WNOHANG) > 0)
-    ;
-  errno = saved_errno;
-}
+  if (args->type == ST_NONE) {
+    args->type = ST_DEFAULT;
+  }
 
-void sigint_handler(int s) { cleanup(); }
+  return;
+}
 
 void single_process_server(int sockfd) {
   int newsockfd;
@@ -133,6 +123,19 @@ void fork_server(int sockfd) {
   }
 }
 
+void fork_server_cleanup() {
+  if ((stats_ipc != NULL) && (stats_ipc->lock != STATS_NO_LOCK)) {
+    printf("closing sem\n");
+    if (sem_close(stats_ipc->lock) < 0) {
+      perror("sem_close");
+    }
+    if (sem_unlink(SEM_NAME) < 0) {
+      perror("sem_unlink");
+    }
+    stats_ipc->lock = STATS_NO_LOCK;
+  }
+}
+
 void *thread_run(void *arg) {
   struct thread_args *targs = arg;
   int ret;
@@ -140,9 +143,7 @@ void *thread_run(void *arg) {
   ret = handle(targs->stats, targs->sockfd,
                (struct sockaddr *)&targs->client_addr, targs->addr_size);
   if (ret < 0) {
-    close(targs->sockfd);
     perror("handle");
-    return NULL;
   }
   close(targs->sockfd);
   targs->is_finished = 1;
@@ -232,69 +233,4 @@ void thread_server(int sockfd) {
 
     free_thread_args(thread_args_arr, max_num_threads);
   }
-}
-
-int main(int argc, char *argv[]) {
-  int sockfd, status;
-  struct addrinfo hints, *servinfo, *p;
-  struct sigaction sa_chld, sa_int;
-  int yes = 1;
-
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE;
-
-  status = getaddrinfo(NULL, PORT, &hints, &servinfo);
-  if (status != 0) {
-    fprintf(stderr, "getaddrinfo() failed: %s\n", gai_strerror(status));
-    return 1;
-  }
-
-  for (p = servinfo; p != NULL; p = p->ai_next) {
-    sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-    if (sockfd == -1) {
-      perror("server: socket");
-      continue;
-    }
-
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
-      HANDLE_ERROR_EXIT("setsockopt");
-
-    if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-      close(sockfd);
-      perror("server: bind");
-      continue;
-    }
-
-    break;
-  }
-  freeaddrinfo(servinfo);
-
-  if (p == NULL) {
-    fprintf(stderr, "server: failed to bind\n");
-    exit(EXIT_FAILURE);
-  }
-
-  if (listen(sockfd, BACKLOG) == -1)
-    HANDLE_ERROR_EXIT("listen");
-
-  sa_chld.sa_handler = sigchld_handler;
-  sigemptyset(&sa_chld.sa_mask);
-  sa_chld.sa_flags = SA_RESTART;
-  if (sigaction(SIGCHLD, &sa_chld, NULL) < 0)
-    HANDLE_ERROR_EXIT("sigaction");
-
-  sa_int.sa_handler = sigint_handler;
-  sigemptyset(&sa_int.sa_mask);
-  sa_int.sa_flags = 0;
-  if (sigaction(SIGINT, &sa_int, NULL) < 0)
-    HANDLE_ERROR_EXIT("sigaction");
-
-  printf("server: waiting for connections on port %s\n", PORT);
-  // TODO: add getopt for arguments
-  // single_process_server(sockfd);
-  // fork_server(sockfd);
-  thread_server(sockfd);
-  return 0;
 }

@@ -15,7 +15,6 @@ typedef struct _Request Request;
 
 typedef struct _Stats Stats;
 
-// Q: how to enum in C?
 struct _Request {
   int method;
   char *uri;

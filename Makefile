@@ -1,12 +1,12 @@
 CC = gcc
 CPPFLAGS = -Iinclude
-CFLAGS = -g -Wall -std=gnu99
+CFLAGS = -g -Wall -Wextra -Werror -std=gnu99
 LDLIBS = -pthread
 LDFLAGS =
 
 all: server client showip
 
-server: obj/server.o obj/handler.o
+server: obj/main.o obj/server.o obj/handler.o
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 client: obj/client.o
