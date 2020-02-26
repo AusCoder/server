@@ -1,6 +1,7 @@
 #ifndef _HANDLER_H
 #define _HANDLER_H
 
+#include "common.h"
 #include "http.h"
 #include <semaphore.h>
 #include <sys/socket.h>

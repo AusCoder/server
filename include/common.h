@@ -26,4 +26,6 @@
     return;                                                                    \
   } while (0)
 
+#define UNUSED __attribute__ ((unused))
+
 #endif

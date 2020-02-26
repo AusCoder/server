@@ -16,12 +16,12 @@
 
 // Could run with atexit, but then the child processes can
 // remove the semaphore. For now, we run it on SIGINT
-void sigint_handler(int s) { 
+void sigint_handler(UNUSED int s) { 
   fork_server_cleanup();
   exit(EXIT_FAILURE);
 }
 
-void sigchld_handler(int s) {
+void sigchld_handler(UNUSED int s) {
   int saved_errno = errno;
   while (waitpid(-1, NULL, WNOHANG) > 0)
     ;

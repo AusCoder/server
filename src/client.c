@@ -1,3 +1,4 @@
+#include "common.h"
 #include "http.h"
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -18,7 +19,7 @@ void *get_in_addr(struct sockaddr *sa) {
   return &(((struct sockaddr_in6 *)sa)->sin6_addr);
 }
 
-void formatHttpRequest(char *buf, size_t buflen, const char *uri) {
+void formatHttpRequest(char *buf, UNUSED size_t buflen, const char *uri) {
   strcpy(buf, STR_GET);
   strcat(buf, " ");
   strcat(buf, uri); // TODO: check length

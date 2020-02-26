@@ -49,7 +49,7 @@ int stats_inc(Stats *stats, StatsMod mod) {
   return 0;
 }
 
-ssize_t readRequestBuf(int sockfd, char *recvBuf, int bufsize) {
+ssize_t read_request_buf(int sockfd, char *recvBuf, int bufsize) {
   ssize_t numbytes;
 
   numbytes = recv(sockfd, recvBuf, bufsize - 1, 0);
@@ -73,7 +73,7 @@ ssize_t readRequestBuf(int sockfd, char *recvBuf, int bufsize) {
 
 // How to handle content spread across buffers?
 // Simple solution for now is to just increase the buffer size
-int parseHttpRequest(char *content, ssize_t content_len, Request *req) {
+int parse_http_request(char *content, UNUSED ssize_t content_len, Request *req) {
   char *component;
 
   component = strsep(&content, " ");
@@ -95,12 +95,14 @@ int parseHttpRequest(char *content, ssize_t content_len, Request *req) {
 }
 
 // Q: why can't I put an inline here?
-void formatHttpHeaders(char *buf, size_t buflen, size_t contentlen) {
+// A: Because it is not a static function
+// TODO: We really should check the buflen here
+void format_http_headers(char *buf, UNUSED size_t buflen, size_t contentlen) {
   sprintf(buf, "%s %s %s\r\n%s: %ld\r\n\r\n", STR_HTTP10, STR_STATUS_200,
           STR_STATUS_OK, STR_H_CONTENT_LEN, contentlen);
 }
 
-void formatHttpHeadersText(char *buf, size_t buflen, size_t contentlen) {
+void format_http_headers_text(char *buf, UNUSED size_t buflen, size_t contentlen) {
   sprintf(buf, "%s %s %s\r\n%s: %ld\r\n", STR_HTTP10, STR_STATUS_200,
           STR_STATUS_OK, STR_H_CONTENT_LEN, contentlen);
   size_t curbuflen = strlen(buf);
@@ -168,7 +170,7 @@ int readAllFromFd(int fd, char *buf, int bufsize) {
   }
 }
 
-int readDirectoryForkExec(const char *dirpath, char *buf, int bufsize) {
+int read_directory_fork_exec(const char *dirpath, char *buf, int bufsize) {
   int ret;
   pid_t f;
   int pipefd[2];
@@ -204,7 +206,7 @@ int readDirectoryForkExec(const char *dirpath, char *buf, int bufsize) {
   return ret;
 }
 
-int readDirectoryInProc(const char *dirpath, char *buf, int bufsize) {
+int read_directory_in_proc(const char *dirpath, char *buf, size_t bufsize) {
   size_t byteswritten, entNameSize;
   DIR *dir;
   struct dirent *ent;
@@ -242,7 +244,7 @@ int readDirectoryInProc(const char *dirpath, char *buf, int bufsize) {
   }
 }
 
-int handleStats(Stats *stats, int sockfd) {
+int handle_stats(Stats *stats, int sockfd) {
   size_t contentLen;
   char contentBuf[BUFSIZE], headerBuf[BUFSIZE];
 
@@ -252,7 +254,7 @@ int handleStats(Stats *stats, int sockfd) {
           stats->reqs, stats->r2xx, stats->r3xx, stats->r4xx, stats->r5xx);
   contentLen = strlen(contentBuf);
 
-  formatHttpHeaders(headerBuf, BUFSIZE, contentLen);
+  format_http_headers(headerBuf, BUFSIZE, contentLen);
 
   if (send(sockfd, headerBuf, strlen(headerBuf), 0) < 0) {
     perror("send");
@@ -269,19 +271,19 @@ int handleStats(Stats *stats, int sockfd) {
   return 0;
 }
 
-int handleDirectory(Stats *stats, int sockfd, Request *req,
+int handle_directory(UNUSED Stats *stats, int sockfd, UNUSED Request *req,
                     const char *dirpath) {
   int contentlen;
   char headerBuf[BUFSIZE];
   char contentBuf[SENDBUFSIZE];
 
   // TODO: how does other copy functions handle the terminating byte?
-  contentlen = readDirectoryInProc(dirpath, contentBuf, SENDBUFSIZE);
+  contentlen = read_directory_in_proc(dirpath, contentBuf, SENDBUFSIZE);
   if (contentlen < 0) {
     return -1;
   }
 
-  formatHttpHeadersText(headerBuf, BUFSIZE, contentlen);
+  format_http_headers_text(headerBuf, BUFSIZE, contentlen);
   if (sendAll(sockfd, headerBuf, strlen(headerBuf)) < 0) {
     return -1;
   }
@@ -292,7 +294,7 @@ int handleDirectory(Stats *stats, int sockfd, Request *req,
   return 0;
 }
 
-int handleFileOrDirectory(Stats *stats, int sockfd, Request *req) {
+int handle_file_or_directory(Stats *stats, int sockfd, Request *req) {
   int fd;
   ssize_t sendFileSize;
   char headerBuf[BUFSIZE], filepath[BUFSIZE];
@@ -312,7 +314,7 @@ int handleFileOrDirectory(Stats *stats, int sockfd, Request *req) {
     return -1;
   }
   if ((statbuf.st_mode & S_IFMT) == S_IFDIR) {
-    return handleDirectory(stats, sockfd, req, filepath);
+    return handle_directory(stats, sockfd, req, filepath);
   }
   sendFileSize = statbuf.st_size;
 
@@ -324,7 +326,7 @@ int handleFileOrDirectory(Stats *stats, int sockfd, Request *req) {
     return -1;
   }
 
-  formatHttpHeaders(headerBuf, BUFSIZE, sendFileSize);
+  format_http_headers(headerBuf, BUFSIZE, sendFileSize);
   // TODO: should loop here because send might not send everything
   if (send(sockfd, headerBuf, strlen(headerBuf), 0) < 0) {
     perror("send");
@@ -345,30 +347,34 @@ int handleFileOrDirectory(Stats *stats, int sockfd, Request *req) {
 }
 
 int dispatch(Stats *stats, int sockfd, Request *req) {
+  // this guy needs to handle the stats incrementing
   if (strcmp(req->uri, STATS_URL) == 0) {
-    return handleStats(stats, sockfd);
+    return handle_stats(stats, sockfd);
   }
-  return handleFileOrDirectory(stats, sockfd, req);
+  return handle_file_or_directory(stats, sockfd, req);
+  
+  //if (stats_inc(stats, SM_INC_2XX) < 0) {
+  //  perror("stats_inc");
+  //  return -1;
+  //}
 }
 
 int handle(Stats *stats, int sockfd, struct sockaddr *client_addr,
-           socklen_t addr_size) {
+           UNUSED socklen_t addr_size) {
   Request req;
   ssize_t numbytes;
   char client_addr_str[INET6_ADDRSTRLEN], recvBuf[BUFSIZE];
 
   inet_ntop(client_addr->sa_family, get_in_addr(client_addr), client_addr_str,
             sizeof(client_addr_str));
-  // TODO: Try without printing all these logs and see if
-  //  I am getting requests that aren't processed somewhere
-  // (Trying to track down why num requests greater than expected)
+  
   printf("server: got connection from %s\n", client_addr_str);
   if (stats_inc(stats, SM_INC_REQ) < 0) {
     perror("stats_inc");
     return -1;
   }
 
-  numbytes = readRequestBuf(sockfd, recvBuf, BUFSIZE);
+  numbytes = read_request_buf(sockfd, recvBuf, BUFSIZE);
   if (numbytes < 0) {
     fprintf(stderr, "failed to read a request buffer from socket: %d\n",
             sockfd);
@@ -376,7 +382,7 @@ int handle(Stats *stats, int sockfd, struct sockaddr *client_addr,
   }
 
   // Parse request
-  if (parseHttpRequest(recvBuf, numbytes, &req) < 0) {
+  if (parse_http_request(recvBuf, numbytes, &req) < 0) {
     fprintf(stderr, "failed to parse request. TODO: render error num\n");
     return 0;
   }
