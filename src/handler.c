@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #define BUFSIZE 512
+#define RECVBUFSIZE 512
 #define SENDBUFSIZE 1024
 
 void *get_in_addr(struct sockaddr *sa) {
@@ -49,47 +50,84 @@ int stats_inc(Stats *stats, StatsMod mod) {
   return 0;
 }
 
-ssize_t read_request_buf(int sockfd, char *recvBuf, int bufsize) {
-  ssize_t numbytes;
+int read_request(int sockfd, Request *req) {
+  char recvbuf[RECVBUFSIZE];
+  ssize_t numbytes, read_numbytes, scan_numbytes;
+  char *readbuf, *scanbuf, *tmpscanbuf;
+  size_t bufsize = RECVBUFSIZE;
 
-  numbytes = recv(sockfd, recvBuf, bufsize - 1, 0);
-  if (numbytes < 0) {
-    perror("recv");
-    return -1;
-  }
-  // we don't handle large requests for now
-  // I am super paranoid about overflows
-  // I want an expandable buffer!
-  if (numbytes >= BUFSIZE - 1) {
-    fprintf(stderr, "request too large\n");
-    return -1;
-  }
-  if (numbytes == 0) { // I don't think this is right?
-    fprintf(stderr, "connection closed by client\n");
-    return -1;
-  }
-  return numbytes;
-}
+  read_numbytes = 0;
+  scan_numbytes = 0;
+  readbuf = recvbuf;
+  scanbuf = recvbuf;
 
-// How to handle content spread across buffers?
-// Simple solution for now is to just increase the buffer size
-int parse_http_request(char *content, UNUSED ssize_t content_len, Request *req) {
-  char *component;
+  req->method = -1;
+  req->uri = NULL;
+  req->httpv = -1;
 
-  component = strsep(&content, " ");
-  if (strcmp(STR_GET, component) != 0) {
-    return -1; // need an enum for handling errors
-  }
-  req->method = METHOD_GET;
-  req->uri = strsep(&content, " "); // TODO: sanitize uri
-  // TODO: handle when just a '\n'
-  component = strsep(&content, "\r\n");
-  if (strcmp(STR_HTTP10, component) == 0) {
-    req->httpv = HTTPV10;
-  } else if (strcmp(STR_HTTP11, component) == 0) {
-    req->httpv = HTTPV11;
-  } else {
-    return -2;
+  while (1) {
+    numbytes = recv(sockfd, readbuf, bufsize, 0);
+    if (numbytes < 0)
+      PERROR_RETURN("recv", -1);
+
+    if (numbytes == 0) {
+      printf("numbytes == 0\n");
+      break;
+    }
+
+    read_numbytes += numbytes;
+    scan_numbytes += numbytes;
+    readbuf += numbytes;
+    bufsize -= numbytes;
+
+    if (req->method == -1) {
+      tmpscanbuf = memchr(scanbuf, ' ', scan_numbytes);
+      if (tmpscanbuf == NULL)
+        STDERR_RETURN("memchr method", -1); // TODO should be a stderr error
+      // need an enum for handling errors
+      if (memcmp(STR_GET, scanbuf, STR_GET_LEN) != 0)
+        STDERR_RETURN("not a get request",
+                      -1);
+      req->method = METHOD_GET;
+
+      // Should check if scan_bytes is negative here
+      scan_numbytes -= tmpscanbuf + 1 - scanbuf;
+      scanbuf = tmpscanbuf + 1;
+    }
+
+    if (req->uri == NULL) {
+      tmpscanbuf = memchr(scanbuf, ' ', scan_numbytes);
+      // This should error for really long uris
+      // maybe we need a continue
+      if (tmpscanbuf == NULL)
+        STDERR_RETURN("memchr uri", -1);
+
+      *tmpscanbuf = '\0';
+      req->uri = scanbuf;
+
+      scan_numbytes -= tmpscanbuf + 1 - scanbuf;
+      scanbuf = tmpscanbuf + 1;
+    }
+
+    tmpscanbuf = memchr(scanbuf, '\n', scan_numbytes);
+    if (tmpscanbuf == NULL)
+      STDERR_RETURN("memchr httpv", -1); // maybe this should continue?
+    if (*(tmpscanbuf - 1) != '\r')
+      STDERR_RETURN("bad carriage return", -1);
+
+    if (memcmp(STR_HTTP10, scanbuf, STR_HTTP10_LEN) == 0) {
+      req->httpv = HTTPV10;
+    } else if (memcmp(STR_HTTP11, scanbuf, STR_HTTP11_LEN) == 0) {
+      req->httpv = HTTPV11;
+    } else {
+      STDERR_RETURN("httpv", -1);
+    }
+    scan_numbytes -= tmpscanbuf + 1 - scanbuf;
+    scanbuf = tmpscanbuf + 1;
+
+    // now comes all the headers
+
+    break;
   }
   return 0;
 }
@@ -102,7 +140,8 @@ void format_http_headers(char *buf, UNUSED size_t buflen, size_t contentlen) {
           STR_STATUS_OK, STR_H_CONTENT_LEN, contentlen);
 }
 
-void format_http_headers_text(char *buf, UNUSED size_t buflen, size_t contentlen) {
+void format_http_headers_text(char *buf, UNUSED size_t buflen,
+                              size_t contentlen) {
   sprintf(buf, "%s %s %s\r\n%s: %ld\r\n", STR_HTTP10, STR_STATUS_200,
           STR_STATUS_OK, STR_H_CONTENT_LEN, contentlen);
   size_t curbuflen = strlen(buf);
@@ -272,7 +311,7 @@ int handle_stats(Stats *stats, int sockfd) {
 }
 
 int handle_directory(UNUSED Stats *stats, int sockfd, UNUSED Request *req,
-                    const char *dirpath) {
+                     const char *dirpath) {
   int contentlen;
   char headerBuf[BUFSIZE];
   char contentBuf[SENDBUFSIZE];
@@ -352,8 +391,8 @@ int dispatch(Stats *stats, int sockfd, Request *req) {
     return handle_stats(stats, sockfd);
   }
   return handle_file_or_directory(stats, sockfd, req);
-  
-  //if (stats_inc(stats, SM_INC_2XX) < 0) {
+
+  // if (stats_inc(stats, SM_INC_2XX) < 0) {
   //  perror("stats_inc");
   //  return -1;
   //}
@@ -362,32 +401,37 @@ int dispatch(Stats *stats, int sockfd, Request *req) {
 int handle(Stats *stats, int sockfd, struct sockaddr *client_addr,
            UNUSED socklen_t addr_size) {
   Request req;
-  ssize_t numbytes;
-  char client_addr_str[INET6_ADDRSTRLEN], recvBuf[BUFSIZE];
+  // ssize_t numbytes;
+  char client_addr_str[INET6_ADDRSTRLEN];
 
   inet_ntop(client_addr->sa_family, get_in_addr(client_addr), client_addr_str,
             sizeof(client_addr_str));
-  
+
   printf("server: got connection from %s\n", client_addr_str);
   if (stats_inc(stats, SM_INC_REQ) < 0) {
     perror("stats_inc");
     return -1;
   }
 
-  numbytes = read_request_buf(sockfd, recvBuf, BUFSIZE);
-  if (numbytes < 0) {
-    fprintf(stderr, "failed to read a request buffer from socket: %d\n",
-            sockfd);
+  // numbytes = read_request_buf(sockfd, recvBuf, BUFSIZE);
+  // if (numbytes < 0) {
+  //  fprintf(stderr, "failed to read a request buffer from socket: %d\n",
+  //          sockfd);
+  //  return -1;
+  //}
+
+  //// Parse request
+  // if (parse_http_request(recvBuf, numbytes, &req) < 0) {
+  //  fprintf(stderr, "failed to parse request. TODO: render error num\n");
+  //  return 0;
+  //}
+
+  if (read_request(sockfd, &req) < 0) {
+    fprintf(stderr, "failed to read or parse request\n");
     return -1;
   }
 
-  // Parse request
-  if (parse_http_request(recvBuf, numbytes, &req) < 0) {
-    fprintf(stderr, "failed to parse request. TODO: render error num\n");
-    return 0;
-  }
   printf("method: %d. uri: %s. http version: %d\n", req.method, req.uri,
          req.httpv);
   return dispatch(stats, sockfd, &req);
 }
-

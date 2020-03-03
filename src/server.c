@@ -1,6 +1,6 @@
+#include "server.h"
 #include "common.h"
 #include "handler.h"
-#include "server.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>

@@ -1,4 +1,3 @@
-#include "server.h"
 #include "common.h"
 #include "server.h"
 #include <errno.h>
@@ -16,7 +15,7 @@
 
 // Could run with atexit, but then the child processes can
 // remove the semaphore. For now, we run it on SIGINT
-void sigint_handler(UNUSED int s) { 
+void sigint_handler(UNUSED int s) {
   fork_server_cleanup();
   exit(EXIT_FAILURE);
 }

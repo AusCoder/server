@@ -2,8 +2,8 @@
 #define _SERVER_H
 #include "common.h"
 #include "handler.h"
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 

@@ -2,8 +2,10 @@
 #define _HTTP_H
 
 #define STR_CRLF "\r\n"
+#define STD_CRLF_LEN 2
 
 #define STR_GET "GET"
+#define STR_GET_LEN 3
 
 #define STR_HTTP10 "HTTP/1.0"
 #define STR_HTTP10_LEN 8
