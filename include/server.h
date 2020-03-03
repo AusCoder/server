@@ -20,12 +20,15 @@ typedef enum {
 
 #define ST_DEFAULT ST_THREAD;
 
+#define THREAD_POOL_NUM_THREADS 16;
+
 struct server_args {
   ServerType type;
 };
 
 void read_server_args(int argc, char *const argv[], struct server_args *args);
 
+// Args for the spawn thread server
 struct thread_args {
   Stats *stats;
   int sockfd;
@@ -33,6 +36,13 @@ struct thread_args {
   socklen_t addr_size;
   pthread_t thread_id;
   int is_finished;
+};
+
+// Args for thread pool server
+struct thread_pool_args {
+  Stats *stats;
+  int sockfd;
+  pthread_t thread_id;
 };
 
 void single_process_server(int sockfd);

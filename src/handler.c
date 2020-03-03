@@ -50,6 +50,11 @@ int stats_inc(Stats *stats, StatsMod mod) {
   return 0;
 }
 
+static void free_request(Request *req) {
+  free(req->uri);
+}
+
+// Allocates for the request uri
 int read_request(int sockfd, Request *req) {
   char recvbuf[RECVBUFSIZE];
   ssize_t numbytes, read_numbytes, scan_numbytes;
@@ -60,10 +65,6 @@ int read_request(int sockfd, Request *req) {
   scan_numbytes = 0;
   readbuf = recvbuf;
   scanbuf = recvbuf;
-
-  req->method = -1;
-  req->uri = NULL;
-  req->httpv = -1;
 
   while (1) {
     numbytes = recv(sockfd, readbuf, bufsize, 0);
@@ -80,34 +81,31 @@ int read_request(int sockfd, Request *req) {
     readbuf += numbytes;
     bufsize -= numbytes;
 
-    if (req->method == -1) {
-      tmpscanbuf = memchr(scanbuf, ' ', scan_numbytes);
-      if (tmpscanbuf == NULL)
-        STDERR_RETURN("memchr method", -1); // TODO should be a stderr error
-      // need an enum for handling errors
-      if (memcmp(STR_GET, scanbuf, STR_GET_LEN) != 0)
-        STDERR_RETURN("not a get request",
-                      -1);
-      req->method = METHOD_GET;
+    tmpscanbuf = memchr(scanbuf, ' ', scan_numbytes);
+    if (tmpscanbuf == NULL)
+      STDERR_RETURN("memchr method", -1); // TODO should be a stderr error
+    // need an enum for handling errors
+    if (memcmp(STR_GET, scanbuf, STR_GET_LEN) != 0)
+      STDERR_RETURN("not a get request",
+                    -1);
+    req->method = METHOD_GET;
 
-      // Should check if scan_bytes is negative here
-      scan_numbytes -= tmpscanbuf + 1 - scanbuf;
-      scanbuf = tmpscanbuf + 1;
-    }
+    // Should check if scan_bytes is negative here
+    scan_numbytes -= tmpscanbuf + 1 - scanbuf;
+    scanbuf = tmpscanbuf + 1;
 
-    if (req->uri == NULL) {
-      tmpscanbuf = memchr(scanbuf, ' ', scan_numbytes);
-      // This should error for really long uris
-      // maybe we need a continue
-      if (tmpscanbuf == NULL)
-        STDERR_RETURN("memchr uri", -1);
+    tmpscanbuf = memchr(scanbuf, ' ', scan_numbytes);
+    // This should error for really long uris
+    // maybe we need a continue
+    if (tmpscanbuf == NULL)
+      STDERR_RETURN("memchr uri", -1);
 
-      *tmpscanbuf = '\0';
-      req->uri = scanbuf;
+    *tmpscanbuf = '\0';
+    req->uri = (char *)malloc(sizeof(char) * (tmpscanbuf + 1 - scanbuf));
+    strcpy(req->uri, scanbuf);
 
-      scan_numbytes -= tmpscanbuf + 1 - scanbuf;
-      scanbuf = tmpscanbuf + 1;
-    }
+    scan_numbytes -= tmpscanbuf + 1 - scanbuf;
+    scanbuf = tmpscanbuf + 1;
 
     tmpscanbuf = memchr(scanbuf, '\n', scan_numbytes);
     if (tmpscanbuf == NULL)
@@ -387,10 +385,14 @@ int handle_file_or_directory(Stats *stats, int sockfd, Request *req) {
 
 int dispatch(Stats *stats, int sockfd, Request *req) {
   // this guy needs to handle the stats incrementing
+  int ret;
   if (strcmp(req->uri, STATS_URL) == 0) {
-    return handle_stats(stats, sockfd);
+    ret = handle_stats(stats, sockfd);
+  } else {
+    ret = handle_file_or_directory(stats, sockfd, req);
   }
-  return handle_file_or_directory(stats, sockfd, req);
+  free_request(req);
+  return ret;
 
   // if (stats_inc(stats, SM_INC_2XX) < 0) {
   //  perror("stats_inc");
@@ -401,7 +403,6 @@ int dispatch(Stats *stats, int sockfd, Request *req) {
 int handle(Stats *stats, int sockfd, struct sockaddr *client_addr,
            UNUSED socklen_t addr_size) {
   Request req;
-  // ssize_t numbytes;
   char client_addr_str[INET6_ADDRSTRLEN];
 
   inet_ntop(client_addr->sa_family, get_in_addr(client_addr), client_addr_str,
