@@ -39,6 +39,13 @@
     return ret;                                                                \
   } while (0)
 
+#define PERROR_RETURN_ERRNO(en, msg, ret)                                                \
+  do {                                                                         \
+    error = en;                                                                \
+    perror(msg);                                                               \
+    return ret;                                                                \
+  } while (0)
+
 #define HANDLE_ERROR_RETURN_VOID(msg)                                          \
   do {                                                                         \
     perror(msg);                                                               \
@@ -67,6 +74,12 @@
   do {                                                                         \
     fprintf(stderr, "%s\n", msg);                                              \
     return;                                                                    \
+  } while (0)
+
+#define STDERR_EXIT(msg)                                                \
+  do {                                                                         \
+    fprintf(stderr, "%s\n", msg);                                              \
+    exit(EXIT_FAILURE);                                                        \
   } while (0)
 
 #define UNUSED __attribute__((unused))

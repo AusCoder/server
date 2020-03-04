@@ -2,6 +2,7 @@
 #define _SERVER_H
 #include "common.h"
 #include "handler.h"
+#include "queue.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +31,23 @@ struct server_args {
 
 void read_server_args(int argc, char *const argv[], struct server_args *args);
 
-// Args for the spawn thread server
+/* Single process server
+ * Processes one request at a time
+ */
+void single_process_server(int sockfd);
+
+/* Fork server
+ * Forks a new process for each request
+ */
+void fork_server(int sockfd);
+
+void fork_server_cleanup();
+
+/* Thread server args
+ * Starts new thread pre request
+ */
+void thread_server(int sockfd);
+
 struct thread_args {
   Stats *stats;
   int sockfd;
@@ -40,18 +57,21 @@ struct thread_args {
   int is_finished;
 };
 
-// Args for thread pool server
+/* Thread pool server
+ * Uses a pool of threads blocked on accept for new connections
+ */
+void thread_pool_server(int sockfd);
+
 struct thread_pool_args {
   Stats *stats;
   int sockfd;
   pthread_t thread_id;
 };
 
-void single_process_server(int sockfd);
-void fork_server(int sockfd);
-void thread_server(int sockfd);
-void thread_pool_server(int sockfd);
-
-void fork_server_cleanup();
+/* Thread queue server
+ * Queues requests and uses thread pool to process requests
+ * from the queue
+ */
+void thread_queue_server(int sockfd);
 
 #endif

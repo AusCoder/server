@@ -67,25 +67,23 @@ int main(int argc, char *argv[]) {
   }
   freeaddrinfo(servinfo);
 
-  if (p == NULL) {
-    fprintf(stderr, "server: failed to bind\n");
-    exit(EXIT_FAILURE);
-  }
+  if (p == NULL)
+    STDERR_EXIT("server: failed to bind");
 
   if (listen(sockfd, BACKLOG) == -1)
-    HANDLE_ERROR_EXIT("listen");
+    PERROR_EXIT("listen");
 
   sa_chld.sa_handler = sigchld_handler;
   sigemptyset(&sa_chld.sa_mask);
   sa_chld.sa_flags = SA_RESTART;
   if (sigaction(SIGCHLD, &sa_chld, NULL) < 0)
-    HANDLE_ERROR_EXIT("sigaction");
+    PERROR_EXIT("sigaction");
 
   sa_int.sa_handler = sigint_handler;
   sigemptyset(&sa_int.sa_mask);
   sa_int.sa_flags = 0;
   if (sigaction(SIGINT, &sa_int, NULL) < 0)
-    HANDLE_ERROR_EXIT("sigaction");
+    PERROR_EXIT("sigaction");
 
   if (servargs.type == ST_SINGLE) {
     printf("single process server: waiting for connections on port %s\n", PORT);
@@ -100,8 +98,7 @@ int main(int argc, char *argv[]) {
     printf("thread pool server: waiting for connections on port %s\n", PORT);
     thread_pool_server(sockfd);
   } else {
-    fprintf(stderr, "Unknown server type\n");
-    exit(EXIT_FAILURE);
+    STDERR_EXIT("Unknown server type");
   }
   return 0;
 }

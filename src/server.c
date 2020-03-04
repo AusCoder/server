@@ -117,7 +117,7 @@ void fork_server(int sockfd) {
     if (ret < 0)
       PERROR_EXIT("fork");
 
-    if (ret == 0) { // the child process
+    if (ret == 0) { // child
       close(sockfd);
 
       if (handle(stats_ipc, newsockfd, (struct sockaddr *)&client_addr,
