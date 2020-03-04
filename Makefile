@@ -6,7 +6,7 @@ LDFLAGS =
 
 all: server client showip
 
-server: obj/main.o obj/server.o obj/handler.o
+server: obj/main.o obj/server.o obj/handler.o obj/queue.o
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 client: obj/client.o

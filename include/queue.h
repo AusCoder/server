@@ -21,9 +21,9 @@ struct queue {
 
 int queue_init(struct queue *q);
 
-void queue_destroy(struct queue *q);
+int queue_destroy(struct queue *q);
 
-void queue_put(struct queue *q, int sockfd);
+int queue_put(struct queue *q, int sockfd);
 
 int queue_get(struct queue *q);
 
