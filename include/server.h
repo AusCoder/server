@@ -11,16 +11,18 @@ typedef enum {
   ST_SINGLE,
   ST_FORK,
   ST_THREAD,
+  ST_THREAD_POOL,
   ST_NONE,
 } ServerType;
 
 #define ST_ARG_SINGLE "single"
 #define ST_ARG_FORK "fork"
 #define ST_ARG_THREAD "thread"
+#define ST_ARG_THREAD_POOL "thread-pool"
 
-#define ST_DEFAULT ST_THREAD;
+#define ST_DEFAULT ST_THREAD
 
-#define THREAD_POOL_NUM_THREADS 16;
+#define THREAD_POOL_NUM_THREADS 16
 
 struct server_args {
   ServerType type;
@@ -48,6 +50,7 @@ struct thread_pool_args {
 void single_process_server(int sockfd);
 void fork_server(int sockfd);
 void thread_server(int sockfd);
+void thread_pool_server(int sockfd);
 
 void fork_server_cleanup();
 

@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 
 #define SEM_NAME "server"
+#define HANDLE_ERR_MSG "handle: error\n"
 
 Stats *stats_ipc = NULL;
 
@@ -28,6 +29,9 @@ void read_server_args(int argc, char *const argv[], struct server_args *args) {
         break;
       } else if (strcmp(ST_ARG_THREAD, optarg) == 0) {
         args->type = ST_THREAD;
+        break;
+      } else if (strcmp(ST_ARG_THREAD_POOL, optarg) == 0) {
+        args->type = ST_THREAD_POOL;
         break;
       } else {
         fprintf(stderr, "Invalid server type: %s\n", optarg);
@@ -64,13 +68,14 @@ void single_process_server(int sockfd) {
 
     if (handle(&stats, newsockfd, (struct sockaddr *)&client_addr, sin_size) <
         0)
-      fprintf(stderr, "error in handle\n");
+      fprintf(stderr, HANDLE_ERR_MSG);
     close(newsockfd);
   }
 }
 
 void fork_server(int sockfd) {
   int newsockfd;
+  pid_t ret;
   struct sockaddr_storage client_addr;
   socklen_t sin_size;
 
@@ -108,13 +113,16 @@ void fork_server(int sockfd) {
       continue;
     }
 
-    if (!fork()) { // the child process
+    ret = fork();
+    if (ret < 0)
+      PERROR_EXIT("fork");
+
+    if (ret == 0) { // the child process
       close(sockfd);
 
       if (handle(stats_ipc, newsockfd, (struct sockaddr *)&client_addr,
-                 sin_size) < 0) {
-        perror("handler");
-      }
+                 sin_size) < 0)
+        fprintf(stderr, HANDLE_ERR_MSG);
       close(newsockfd);
       exit(0);
     }
@@ -137,13 +145,11 @@ void fork_server_cleanup() {
 
 void *thread_run(void *arg) {
   struct thread_args *targs = arg;
-  int ret;
 
-  ret = handle(targs->stats, targs->sockfd,
-               (struct sockaddr *)&targs->client_addr, targs->addr_size);
-  if (ret < 0) {
-    perror("handle");
-  }
+  if (handle(targs->stats, targs->sockfd,
+             (struct sockaddr *)&targs->client_addr, targs->addr_size) < 0)
+    fprintf(stderr, HANDLE_ERR_MSG);
+
   close(targs->sockfd);
   targs->is_finished = 1;
   return NULL;
@@ -235,91 +241,51 @@ void thread_server(int sockfd) {
 }
 
 void *thread_pool_run(void *_args) {
-  int ret;
+  int newsockfd;
   socklen_t sin_size;
   struct sockaddr_storage client_addr;
   struct thread_pool_args *args = _args;
 
+  sin_size = sizeof(client_addr);
+
   while (1) {
-    sin_size = sizeof(client_addr);
-    newsockfd = accept(args->sockfd, (struct sockaddr *)&client_addr, &sin_size);
+    newsockfd =
+        accept(args->sockfd, (struct sockaddr *)&client_addr, &sin_size);
     if (newsockfd < 0) {
       perror("accept");
       continue;
     }
-    if (handle(args->stats, newsockfd, (struct sockaddr *)&client_addr, sin_size) < 0)
-      fprintf(stderr, "error in handle\n");
+    if (handle(args->stats, newsockfd, (struct sockaddr *)&client_addr,
+               sin_size) < 0)
+      fprintf(stderr, HANDLE_ERR_MSG);
     close(newsockfd);
   }
 }
 
 void thread_pool_server(int sockfd) {
-  struct thread_pool_args *args_arr[THREAD_POOL_NUM_THREADS];
+  int ret;
+  struct thread_pool_args *targs;
+  struct thread_pool_args *targs_arr[THREAD_POOL_NUM_THREADS];
   Stats stats;
 
   memset(&stats, 0, sizeof(stats));
   stats.lock = STATS_NO_LOCK;
 
   for (int i = 0; i < THREAD_POOL_NUM_THREADS; i++) {
-    thread_pool_args[i] = (struct thread_pool_args *)malloc(sizeof(struct thread_pool_args));
-    thread_pool_args[i]->stats = stats;
-  }
-
-
-  int newsockfd, ret, max_num_threads;
-  max_num_threads = 20;
-  struct thread_args *thread_args_arr[max_num_threads];
-  struct thread_args *targs;
-  struct sockaddr_storage client_addr;
-  socklen_t sin_size;
-  Stats stats;
-
-  memset(&stats, 0, sizeof(stats));
-  stats.lock = STATS_NO_LOCK;
-
-  for (int i = 0; i < max_num_threads; i++) {
-    thread_args_arr[i] = NULL;
-  }
-
-  while (1) {
-    sin_size = sizeof(client_addr);
-    newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
-    if (newsockfd < 0) {
-      perror("accept");
-      continue;
-    }
-
-    targs = alloc_thread_args(thread_args_arr, max_num_threads);
-    if (targs == NULL) {
-      // This should kill the program
-      fprintf(stderr, "Could not find free thread_args\n");
-      close(newsockfd);
-      continue;
-    }
+    targs_arr[i] = targs =
+        (struct thread_pool_args *)malloc(sizeof(struct thread_pool_args));
     targs->stats = &stats;
-    targs->sockfd = newsockfd;
-    targs->client_addr = client_addr;
-    targs->addr_size = sin_size;
-    targs->is_finished = 0;
+    targs->sockfd = sockfd;
 
-    // // This struct appears to be shared between the threads!
-    // // 2 threads would end up with the same newsockfd and one
-    // // thread would block on a read from a socket that had
-    // // already been read from
-    // struct thread_args targs;
-    // targs.stats = &stats;
-    // targs.sockfd = newsockfd;
-    // // Problem here!
-    // // Lets see what happens. It would be better to copy.
-    // targs.client_addr = client_addr;
-    // targs.addr_size = sin_size;
-
-    ret = pthread_create(&(targs->thread_id), NULL, thread_run, targs);
-    if (ret != 0) {
-      free_thread_args(thread_args_arr, max_num_threads);
-      HANDLE_ERROR_RETURN_VOID("pthread_create");
+    ret = pthread_create(&(targs->thread_id), NULL, thread_pool_run, targs);
+    if (ret < 0) {
+      close(sockfd);
+      PERROR_RETURN_VOID("pthread_create");
     }
+  }
 
-    free_thread_args(thread_args_arr, max_num_threads);
+  for (int i = 0; i < THREAD_POOL_NUM_THREADS; i++) {
+    targs = targs_arr[i];
+    pthread_join(targs->thread_id, NULL);
   }
 }

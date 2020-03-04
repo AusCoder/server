@@ -50,9 +50,7 @@ int stats_inc(Stats *stats, StatsMod mod) {
   return 0;
 }
 
-static void free_request(Request *req) {
-  free(req->uri);
-}
+static void free_request(Request *req) { free(req->uri); }
 
 // Allocates for the request uri
 int read_request(int sockfd, Request *req) {
@@ -73,7 +71,7 @@ int read_request(int sockfd, Request *req) {
 
     if (numbytes == 0) {
       printf("numbytes == 0\n");
-      break;
+      return -1;
     }
 
     read_numbytes += numbytes;
@@ -86,8 +84,7 @@ int read_request(int sockfd, Request *req) {
       STDERR_RETURN("memchr method", -1); // TODO should be a stderr error
     // need an enum for handling errors
     if (memcmp(STR_GET, scanbuf, STR_GET_LEN) != 0)
-      STDERR_RETURN("not a get request",
-                    -1);
+      STDERR_RETURN("not a get request", -1);
     req->method = METHOD_GET;
 
     // Should check if scan_bytes is negative here
