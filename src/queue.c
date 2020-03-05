@@ -3,10 +3,10 @@
 
 int queue_init(struct queue *q) {
   int en;
-  en = pthread_mutex_init(q->mutex, NULL);
+  en = pthread_mutex_init(&q->mutex, NULL);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_mutex_init", -1);
-  en = pthread_cond_init(q->cond, NULL);
+  en = pthread_cond_init(&q->cond, NULL);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_cond_init", -1);
   q->head = NULL;
@@ -17,30 +17,33 @@ int queue_init(struct queue *q) {
 
 int queue_destroy(struct queue *q) {
   int en;
-  en = pthread_cond_destroy(q->cond);
+  struct message *m;
+  en = pthread_cond_destroy(&q->cond);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_cond_destroy", -1);
-  en = pthread_mutex_destroy(q->mutex);
+  en = pthread_mutex_destroy(&q->mutex);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_mutex_destroy", -1);
+
+  while (q->size > 0) {
+    m = q->head;
+    q->head = q->head->next;
+    free(m);
+  }
   // Free everything - print a warning?
-  if (q->head != NULL || q->last != NULL)
-    STDERR_RETURN("queue_destroy: non empty queue", -1);
+  //if (q->head != NULL || q->last != NULL)
+  //  STDERR_RETURN("queue_destroy: non empty queue", -1);
   return 0;
 }
 
-// These 2 functions will need to lock for
-// all modifications to the queue.
-// Otherwise we might get funky behaviour
-// if both threads are modifying the queue
-// pointers and size.
 int queue_put(struct queue *q, int sockfd) {
+  int en;
   struct message *m;
-  m = (struct message *)malloc(sizeof(m));
+  m = (struct message *)malloc(sizeof(*m));
   m->sockfd = sockfd;
   m->next = NULL;
 
-  en = pthread_mutex_lock(q->mutex);
+  en = pthread_mutex_lock(&q->mutex);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_mutex_lock", -1);
 
@@ -53,25 +56,27 @@ int queue_put(struct queue *q, int sockfd) {
   }
   q->size++;
 
-  en = pthread_cond_signal(q->cond);
+  en = pthread_cond_signal(&q->cond);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_cond_signal", -1);
-  en = pthread_mutex_unlock(q->mutex);
+  en = pthread_mutex_unlock(&q->mutex);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_mutex_unlock", -1);
   return 0;
 }
 
 int queue_get(struct queue *q) {
-  int sockfd;
+  int sockfd, en;
   struct message *m;
 
-  en = pthread_mutex_lock(q->mutex);
+  en = pthread_mutex_lock(&q->mutex);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_mutex_lock", -1);
-  en = pthread_cond_wait(q->cond, q->mutex);
-  if (en != 0)
-    PERROR_RETURN_ERRNO(en, "pthread_cond_wait", -1);
+  while (q->size == 0) {
+    en = pthread_cond_wait(&q->cond, &q->mutex);
+    if (en != 0)
+      PERROR_RETURN_ERRNO(en, "pthread_cond_wait", -1);
+  }
 
   m = q->head;
   sockfd = m->sockfd;
@@ -85,7 +90,7 @@ int queue_get(struct queue *q) {
     q->head = q->head->next;
   }
 
-  en = pthread_mutex_unlock(q->mutex);
+  en = pthread_mutex_unlock(&q->mutex);
   if (en != 0)
     PERROR_RETURN_ERRNO(en, "pthread_mutex_unlock", -1);
   return sockfd;

@@ -1,6 +1,9 @@
 #ifndef _COMMON_H
 #define _COMMON_H
 
+#include <stdio.h>
+#include <errno.h>
+
 #define HANDLE_ERROR_EXIT(msg)                                                 \
   do {                                                                         \
     perror(msg);                                                               \
@@ -15,14 +18,14 @@
 
 #define HANDLE_ERROR_EXIT_ERRNO(en, msg)                                       \
   do {                                                                         \
-    error = en;                                                                \
+    errno = en;                                                                \
     perror(msg);                                                               \
     exit(EXIT_FAILURE);                                                        \
   } while (0)
 
 #define PERROR_EXIT_ERRNO(en, msg)                                             \
   do {                                                                         \
-    error = en;                                                                \
+    errno = en;                                                                \
     perror(msg);                                                               \
     exit(EXIT_FAILURE);                                                        \
   } while (0)
@@ -41,7 +44,7 @@
 
 #define PERROR_RETURN_ERRNO(en, msg, ret)                                                \
   do {                                                                         \
-    error = en;                                                                \
+    errno = en;                                                                \
     perror(msg);                                                               \
     return ret;                                                                \
   } while (0)

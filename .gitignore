@@ -2,7 +2,9 @@ client
 server
 hostname
 showip
+check
 obj
+obj-tests
 out.jpg
 test.jpg
 *.log

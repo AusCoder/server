@@ -1,6 +1,7 @@
 #ifndef _QUEUE_H
 #define _QUEUE_H
 
+#include "common.h"
 #include <stdlib.h>
 #include <pthread.h>
 
