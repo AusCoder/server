@@ -1,7 +1,7 @@
 #include "common.h"
 #include "queue.h"
 
-int queue_init(struct queue *q) {
+int sock_queue_init(struct sock_queue *q) {
   int en;
   en = pthread_mutex_init(&q->mutex, NULL);
   if (en != 0)
@@ -15,7 +15,7 @@ int queue_init(struct queue *q) {
   return 0;
 }
 
-int queue_destroy(struct queue *q) {
+int sock_queue_destroy(struct sock_queue *q) {
   int en;
   struct message *m;
   en = pthread_cond_destroy(&q->cond);
@@ -30,17 +30,14 @@ int queue_destroy(struct queue *q) {
     q->head = q->head->next;
     free(m);
   }
-  // Free everything - print a warning?
-  //if (q->head != NULL || q->last != NULL)
-  //  STDERR_RETURN("queue_destroy: non empty queue", -1);
   return 0;
 }
 
-int queue_put(struct queue *q, int sockfd) {
+int sock_queue_put(struct sock_queue *q, void *body) {
   int en;
   struct message *m;
   m = (struct message *)malloc(sizeof(*m));
-  m->sockfd = sockfd;
+  m->body = body;
   m->next = NULL;
 
   en = pthread_mutex_lock(&q->mutex);
@@ -65,21 +62,22 @@ int queue_put(struct queue *q, int sockfd) {
   return 0;
 }
 
-int queue_get(struct queue *q) {
-  int sockfd, en;
+void *sock_queue_get(struct sock_queue *q) {
+  void *body;
+  int en;
   struct message *m;
 
   en = pthread_mutex_lock(&q->mutex);
   if (en != 0)
-    PERROR_RETURN_ERRNO(en, "pthread_mutex_lock", -1);
+    PERROR_RETURN_ERRNO(en, "pthread_mutex_lock", NULL);
   while (q->size == 0) {
     en = pthread_cond_wait(&q->cond, &q->mutex);
     if (en != 0)
-      PERROR_RETURN_ERRNO(en, "pthread_cond_wait", -1);
+      PERROR_RETURN_ERRNO(en, "pthread_cond_wait", NULL);
   }
 
   m = q->head;
-  sockfd = m->sockfd;
+  body = m->body;
   free(m);
 
   q->size--;
@@ -92,6 +90,6 @@ int queue_get(struct queue *q) {
 
   en = pthread_mutex_unlock(&q->mutex);
   if (en != 0)
-    PERROR_RETURN_ERRNO(en, "pthread_mutex_unlock", -1);
-  return sockfd;
+    PERROR_RETURN_ERRNO(en, "pthread_mutex_unlock", NULL);
+  return body;
 }

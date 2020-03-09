@@ -8,11 +8,11 @@
 /* Queue api used by thead-queue server
  */
 struct message {
-  int sockfd;
+  void *body;
   struct message *next;
 };
 
-struct queue {
+struct sock_queue {
   pthread_mutex_t mutex;
   pthread_cond_t cond;
   struct message *head;
@@ -20,12 +20,12 @@ struct queue {
   size_t size;
 };
 
-int queue_init(struct queue *q);
+int sock_queue_init(struct sock_queue *q);
 
-int queue_destroy(struct queue *q);
+int sock_queue_destroy(struct sock_queue *q);
 
-int queue_put(struct queue *q, int sockfd);
+int sock_queue_put(struct sock_queue *q, void *body);
 
-int queue_get(struct queue *q);
+void *sock_queue_get(struct sock_queue *q);
 
 #endif

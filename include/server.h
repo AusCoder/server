@@ -74,4 +74,16 @@ struct thread_pool_args {
  */
 void thread_queue_server(int sockfd);
 
+struct thread_queue_consumer_args {
+  Stats *stats;
+  struct sock_queue *q;
+  pthread_t thread_id;
+};
+
+struct thread_queue_message_body {
+  int sockfd;
+  struct sockadd_storage client_addr;
+  socklen_t addrlen;
+};
+
 #endif

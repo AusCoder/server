@@ -1,6 +1,4 @@
 #include "server.h"
-#include "common.h"
-#include "handler.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -287,5 +285,44 @@ void thread_pool_server(int sockfd) {
   for (int i = 0; i < THREAD_POOL_NUM_THREADS; i++) {
     targs = targs_arr[i];
     pthread_join(targs->thread_id, NULL);
+  }
+}
+
+//void *thread_queue_consumer_run(void *args) {
+//  int sockfd;
+//  struct thread_queue_consumer_args *targs = args;
+//
+//  while (1) {
+//    sockfd = sock_queue_get(targs->q);
+//    if (sockfd < 0)
+//      STDERR_RETURN("sock_queue_get", NULL);
+//    if (handle(targs->stats, sockfd, (struct sockaddr *)&client_addr,
+//               sin_size) < 0)
+//      fprintf(stderr, HANDLE_ERR_MSG);
+//  }
+//}
+
+void thread_queue_server(int sockfd) {
+  int newsockfd;
+  struct thread_queue_message_body *body;
+  //socklen_t sin_size;
+  //struct sockaddr_storage client_addr;
+  struct sock_queue q;
+  Stats stats;
+
+  memset(&stats, 0, sizeof(stats));
+  stats.lock = STATS_NO_LOCK;
+  sock_queue_init(&q);
+
+  while (1) {
+    //sin_size = sizeof(client_addr);
+    body = (struct thread_queue_message_body *)malloc(sizeof(*body));
+    body->sockfd = accept(sockfd, (struct sockaddr *)&body->client_addr, &body->addrlen);
+    if (newsockfd < 0) {
+      perror("accept");
+      continue;
+    }
+    if (sock_queue_put(&q, newsockfd) < 0)
+      STDERR_RETURN_VOID("sock_queue_put");
   }
 }
