@@ -1,5 +1,5 @@
-#include "common.h"
 #include "queue.h"
+#include "common.h"
 #include <assert.h>
 
 int queue_init(struct queue *q) {

@@ -2,8 +2,8 @@
 #define _QUEUE_H
 
 #include "common.h"
-#include <stdlib.h>
 #include <pthread.h>
+#include <stdlib.h>
 
 /* Queue api used by thead-queue server
  */

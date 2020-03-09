@@ -299,11 +299,11 @@ void *thread_queue_consumer_run(void *args) {
     body = queue_get(targs->q);
     if (body == NULL)
       STDERR_RETURN("queue_get", NULL);
-    
-    if (handle(targs->stats, body->sockfd, (struct sockaddr *)&(body->client_addr),
-               body->addrlen) < 0)
+
+    if (handle(targs->stats, body->sockfd,
+               (struct sockaddr *)&(body->client_addr), body->addrlen) < 0)
       fprintf(stderr, HANDLE_ERR_MSG);
-    
+
     close(body->sockfd);
     free(body);
   }
@@ -328,7 +328,8 @@ void thread_queue_server(int sockfd) {
   targs->stats = &stats;
   targs->q = &q;
 
-  ret = pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run, targs);
+  ret =
+      pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run, targs);
   if (ret < 0) {
     close(sockfd);
     PERROR_RETURN_VOID("pthread_create");
@@ -342,7 +343,8 @@ void thread_queue_server(int sockfd) {
     }
 
     body->addrlen = sizeof(body->client_addr);
-    body->sockfd = accept(sockfd, (struct sockaddr *)&(body->client_addr), &(body->addrlen));
+    body->sockfd = accept(sockfd, (struct sockaddr *)&(body->client_addr),
+                          &(body->addrlen));
     if (body->sockfd < 0) {
       perror("accept");
       free(body);
