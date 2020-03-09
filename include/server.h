@@ -27,6 +27,8 @@ typedef enum {
 
 #define THREAD_POOL_NUM_THREADS 16
 
+#define THREAD_QUEUE_NUM_THREADS 4
+
 struct server_args {
   ServerType type;
 };
