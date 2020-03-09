@@ -1,5 +1,6 @@
 #include "common.h"
 #include "queue.h"
+#include <assert.h>
 
 int queue_init(struct queue *q) {
   int en;
@@ -29,6 +30,7 @@ int queue_destroy(struct queue *q) {
     m = q->head;
     q->head = q->head->next;
     free(m);
+    q->size--;
   }
   return 0;
 }
@@ -45,9 +47,13 @@ int queue_put(struct queue *q, void *body) {
     PERROR_RETURN_ERRNO(en, "pthread_mutex_lock", -1);
 
   if (q->size == 0) {
+    assert(q->head == NULL);
+    assert(q->last == NULL);
     q->head = m;
     q->last = m;
   } else {
+    assert(q->head != NULL);
+    assert(q->last != NULL);
     q->last->next = m;
     q->last = m;
   }
@@ -78,7 +84,6 @@ void *queue_get(struct queue *q) {
 
   m = q->head;
   body = m->body;
-  free(m);
 
   q->size--;
   if (q->size == 0) {
@@ -87,6 +92,8 @@ void *queue_get(struct queue *q) {
   } else {
     q->head = q->head->next;
   }
+
+  free(m);
 
   en = pthread_mutex_unlock(&q->mutex);
   if (en != 0)
