@@ -1,7 +1,7 @@
 #include "common.h"
 #include "queue.h"
 
-int sock_queue_init(struct sock_queue *q) {
+int queue_init(struct queue *q) {
   int en;
   en = pthread_mutex_init(&q->mutex, NULL);
   if (en != 0)
@@ -15,7 +15,7 @@ int sock_queue_init(struct sock_queue *q) {
   return 0;
 }
 
-int sock_queue_destroy(struct sock_queue *q) {
+int queue_destroy(struct queue *q) {
   int en;
   struct message *m;
   en = pthread_cond_destroy(&q->cond);
@@ -33,7 +33,7 @@ int sock_queue_destroy(struct sock_queue *q) {
   return 0;
 }
 
-int sock_queue_put(struct sock_queue *q, void *body) {
+int queue_put(struct queue *q, void *body) {
   int en;
   struct message *m;
   m = (struct message *)malloc(sizeof(*m));
@@ -62,7 +62,7 @@ int sock_queue_put(struct sock_queue *q, void *body) {
   return 0;
 }
 
-void *sock_queue_get(struct sock_queue *q) {
+void *queue_get(struct queue *q) {
   void *body;
   int en;
   struct message *m;

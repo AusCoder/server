@@ -12,7 +12,7 @@ struct message {
   struct message *next;
 };
 
-struct sock_queue {
+struct queue {
   pthread_mutex_t mutex;
   pthread_cond_t cond;
   struct message *head;
@@ -20,12 +20,12 @@ struct sock_queue {
   size_t size;
 };
 
-int sock_queue_init(struct sock_queue *q);
+int queue_init(struct queue *q);
 
-int sock_queue_destroy(struct sock_queue *q);
+int queue_destroy(struct queue *q);
 
-int sock_queue_put(struct sock_queue *q, void *body);
+int queue_put(struct queue *q, void *body);
 
-void *sock_queue_get(struct sock_queue *q);
+void *queue_get(struct queue *q);
 
 #endif

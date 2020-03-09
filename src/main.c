@@ -97,6 +97,9 @@ int main(int argc, char *argv[]) {
   } else if (servargs.type == ST_THREAD_POOL) {
     printf("thread pool server: waiting for connections on port %s\n", PORT);
     thread_pool_server(sockfd);
+  } else if (servargs.type == ST_THREAD_QUEUE) {
+    printf("thread queue server: waiting for connections on port %s\n", PORT);
+    thread_queue_server(sockfd);
   } else {
     STDERR_EXIT("Unknown server type");
   }

@@ -13,6 +13,7 @@ typedef enum {
   ST_FORK,
   ST_THREAD,
   ST_THREAD_POOL,
+  ST_THREAD_QUEUE,
   ST_NONE,
 } ServerType;
 
@@ -20,6 +21,7 @@ typedef enum {
 #define ST_ARG_FORK "fork"
 #define ST_ARG_THREAD "thread"
 #define ST_ARG_THREAD_POOL "thread-pool"
+#define ST_ARG_THREAD_QUEUE "thread-queue"
 
 #define ST_DEFAULT ST_THREAD
 
@@ -76,13 +78,13 @@ void thread_queue_server(int sockfd);
 
 struct thread_queue_consumer_args {
   Stats *stats;
-  struct sock_queue *q;
+  struct queue *q;
   pthread_t thread_id;
 };
 
 struct thread_queue_message_body {
   int sockfd;
-  struct sockadd_storage client_addr;
+  struct sockaddr_storage client_addr;
   socklen_t addrlen;
 };
 

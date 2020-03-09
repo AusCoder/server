@@ -31,6 +31,9 @@ void read_server_args(int argc, char *const argv[], struct server_args *args) {
       } else if (strcmp(ST_ARG_THREAD_POOL, optarg) == 0) {
         args->type = ST_THREAD_POOL;
         break;
+      } else if (strcmp(ST_ARG_THREAD_QUEUE, optarg) == 0) {
+        args->type = ST_THREAD_QUEUE;
+        break;
       } else {
         fprintf(stderr, "Invalid server type: %s\n", optarg);
         exit(EXIT_FAILURE);
@@ -288,41 +291,64 @@ void thread_pool_server(int sockfd) {
   }
 }
 
-//void *thread_queue_consumer_run(void *args) {
-//  int sockfd;
-//  struct thread_queue_consumer_args *targs = args;
-//
-//  while (1) {
-//    sockfd = sock_queue_get(targs->q);
-//    if (sockfd < 0)
-//      STDERR_RETURN("sock_queue_get", NULL);
-//    if (handle(targs->stats, sockfd, (struct sockaddr *)&client_addr,
-//               sin_size) < 0)
-//      fprintf(stderr, HANDLE_ERR_MSG);
-//  }
-//}
+void *thread_queue_consumer_run(void *args) {
+  struct thread_queue_message_body *body;
+  struct thread_queue_consumer_args *targs = args;
+
+  while (1) {
+    body = queue_get(targs->q);
+    //printf("got from queue\n");
+    if (body == NULL)
+      STDERR_RETURN("queue_get", NULL);
+    if (handle(targs->stats, body->sockfd, (struct sockaddr *)&(body->client_addr),
+               body->addrlen) < 0)
+      fprintf(stderr, HANDLE_ERR_MSG);
+
+    close(body->sockfd);
+    free(body);
+  }
+}
 
 void thread_queue_server(int sockfd) {
-  int newsockfd;
+  int ret;
   struct thread_queue_message_body *body;
-  //socklen_t sin_size;
-  //struct sockaddr_storage client_addr;
-  struct sock_queue q;
+  struct thread_queue_consumer_args *targs;
+  struct queue q;
   Stats stats;
 
   memset(&stats, 0, sizeof(stats));
   stats.lock = STATS_NO_LOCK;
-  sock_queue_init(&q);
+  queue_init(&q);
+
+  targs = (struct thread_queue_consumer_args *)malloc(sizeof(*targs));
+  if (targs == NULL) {
+    close(sockfd);
+    PERROR_RETURN_VOID("malloc");
+  }
+  targs->stats = &stats;
+  targs->q = &q;
+  ret = pthread_create(&(targs->thread_id), NULL, thread_queue_consumer_run, targs);
+  if (ret < 0) {
+    close(sockfd);
+    PERROR_RETURN_VOID("pthread_create");
+  }
 
   while (1) {
-    //sin_size = sizeof(client_addr);
     body = (struct thread_queue_message_body *)malloc(sizeof(*body));
-    body->sockfd = accept(sockfd, (struct sockaddr *)&body->client_addr, &body->addrlen);
-    if (newsockfd < 0) {
+    if (body == NULL) {
+      close(sockfd);
+      PERROR_RETURN_VOID("malloc");
+    }
+
+    body->addrlen = sizeof(body->client_addr);
+    body->sockfd = accept(sockfd, (struct sockaddr *)&(body->client_addr), &(body->addrlen));
+    if (body->sockfd < 0) {
       perror("accept");
+      free(body);
       continue;
     }
-    if (sock_queue_put(&q, newsockfd) < 0)
-      STDERR_RETURN_VOID("sock_queue_put");
+    printf("putting to queue\n");
+    if (queue_put(&q, body) < 0)
+      STDERR_RETURN_VOID("queue_put");
   }
 }
