@@ -3,19 +3,11 @@
 #include "common.h"
 #include "handler.h"
 #include "queue.h"
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-typedef enum {
-  ST_SINGLE,
-  ST_FORK,
-  ST_THREAD,
-  ST_THREAD_POOL,
-  ST_THREAD_QUEUE,
-  ST_NONE,
-} ServerType;
 
 #define ST_ARG_SINGLE "single"
 #define ST_ARG_FORK "fork"
@@ -29,28 +21,53 @@ typedef enum {
 
 #define THREAD_QUEUE_NUM_THREADS 4
 
-struct server_args {
+#define MAX_LISTENING_PORTS 2
+#define DEFAULT_PORT "3711"
+
+#define BACKLOG 10
+
+typedef enum {
+  ST_SINGLE,
+  ST_FORK,
+  ST_THREAD,
+  ST_THREAD_POOL,
+  ST_THREAD_QUEUE,
+  ST_NONE,
+} ServerType;
+
+struct server_cli_args {
   ServerType type;
+  char **ports;
+  size_t portslen;
+  size_t portssize;
 };
 
-void read_server_args(int argc, char *const argv[], struct server_args *args);
+int read_server_cli_args(int argc, char *const argv[],
+                         struct server_cli_args *args);
+
+struct server_args {
+  int *sockfds; // sockets server is listening on
+  size_t sockfdslen;
+};
+
+int create_server_socket(const char *port);
 
 /* Single process server
  * Processes one request at a time
  */
-void single_process_server(int sockfd);
+void single_process_server(struct server_args *args);
 
 /* Fork server
  * Forks a new process for each request
  */
-void fork_server(int sockfd);
+void fork_server(struct server_args *args);
 
 void fork_server_cleanup();
 
 /* Thread server args
  * Starts new thread pre request
  */
-void thread_server(int sockfd);
+void thread_server(struct server_args *args);
 
 struct thread_args {
   Stats *stats;
@@ -64,7 +81,7 @@ struct thread_args {
 /* Thread pool server
  * Uses a pool of threads blocked on accept for new connections
  */
-void thread_pool_server(int sockfd);
+void thread_pool_server(struct server_args *args);
 
 struct thread_pool_args {
   Stats *stats;
@@ -76,7 +93,7 @@ struct thread_pool_args {
  * Queues requests and uses thread pool to process requests
  * from the queue
  */
-void thread_queue_server(int sockfd);
+void thread_queue_server(struct server_args *args);
 
 struct thread_queue_consumer_args {
   Stats *stats;

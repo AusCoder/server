@@ -11,12 +11,20 @@
 
 Stats *stats_ipc = NULL;
 
-void read_server_args(int argc, char *const argv[], struct server_args *args) {
+int read_server_cli_args(int argc, char *const argv[],
+                         struct server_cli_args *args) {
+  char *buf;
   int opt;
+
+  args->ports = malloc(MAX_LISTENING_PORTS * sizeof(char *));
+  if (args->ports == NULL)
+    PERROR_RETURN("malloc", -1);
+  args->portssize = MAX_LISTENING_PORTS;
+  args->portslen = 0;
 
   args->type = ST_NONE;
 
-  while ((opt = getopt(argc, argv, "t:")) != -1) {
+  while ((opt = getopt(argc, argv, "t:p:")) != -1) {
     switch (opt) {
     case 't':
       if (strcmp(ST_ARG_SINGLE, optarg) == 0) {
@@ -36,8 +44,18 @@ void read_server_args(int argc, char *const argv[], struct server_args *args) {
         break;
       } else {
         fprintf(stderr, "Invalid server type: %s\n", optarg);
-        exit(EXIT_FAILURE);
+        return -1;
       }
+    case 'p':
+      if (args->portslen >= args->portssize)
+        STDERR_RETURN("more than maximum number of ports specified", -1);
+      args->ports[args->portslen] = buf =
+          malloc((strlen(optarg) + 1) * sizeof(char));
+      if (buf == NULL)
+        PERROR_RETURN("malloc", -1);
+      strcpy(buf, optarg);
+      args->portslen++;
+      break;
     default:
       fprintf(stderr, "Usage: %s [-t type]\n", argv[0]);
       exit(EXIT_FAILURE);
@@ -48,17 +66,77 @@ void read_server_args(int argc, char *const argv[], struct server_args *args) {
     args->type = ST_DEFAULT;
   }
 
-  return;
+  if (args->portslen == 0) {
+    args->ports[args->portslen] = buf =
+        malloc((strlen(DEFAULT_PORT) + 1) * sizeof(char));
+    if (buf == NULL)
+      PERROR_RETURN("malloc", -1);
+    strcpy(buf, DEFAULT_PORT);
+    args->portslen++;
+  }
+
+  return 0;
 }
 
-void single_process_server(int sockfd) {
-  int newsockfd;
+int create_server_socket(const char *port) {
+  int sockfd, status;
+  struct addrinfo hints, *servinfo, *p;
+  int yes = 1;
+
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_PASSIVE;
+
+  status = getaddrinfo(NULL, port, &hints, &servinfo);
+  if (status != 0) {
+    fprintf(stderr, "getaddrinfo() failed: %s\n", gai_strerror(status));
+    return -1;
+  }
+
+  for (p = servinfo; p != NULL; p = p->ai_next) {
+    sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+    if (sockfd < 0) {
+      perror("socket");
+      continue;
+    }
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0)
+      PERROR_RETURN("setsockopt", -1);
+
+    if (bind(sockfd, p->ai_addr, p->ai_addrlen) < 0) {
+      close(sockfd);
+      perror("bind");
+      continue;
+    }
+
+    break;
+  }
+  freeaddrinfo(servinfo);
+
+  if (p == NULL)
+    STDERR_RETURN("failed to bind", -1);
+
+  if (listen(sockfd, BACKLOG) == -1)
+    PERROR_RETURN("listen", -1);
+
+  return sockfd;
+}
+
+void single_process_server(struct server_args *args) {
+  int sockfd, newsockfd;
   struct sockaddr_storage client_addr;
   socklen_t sin_size;
   Stats stats;
+
   memset(&stats, 0, sizeof(stats));
   stats.lock = STATS_NO_LOCK;
 
+  if (args->sockfdslen != 1)
+    STDERR_RETURN_VOID("single_process_server can only run on one port");
+  sockfd = args->sockfds[0];
+
+  // TODO: add a log message saying the server type
   while (1) {
     sin_size = sizeof(client_addr);
     newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
@@ -74,8 +152,8 @@ void single_process_server(int sockfd) {
   }
 }
 
-void fork_server(int sockfd) {
-  int newsockfd;
+void fork_server(struct server_args *args) {
+  int sockfd, newsockfd;
   pid_t ret;
   struct sockaddr_storage client_addr;
   socklen_t sin_size;
@@ -105,6 +183,10 @@ void fork_server(int sockfd) {
   stats_ipc->lock = sem_open(SEM_NAME, O_CREAT | O_EXCL, O_RDWR, 1);
   if (stats_ipc->lock == SEM_FAILED)
     HANDLE_ERROR_RETURN_VOID("sem_open");
+
+  if (args->sockfdslen != 1)
+    STDERR_RETURN_VOID("fork_server can only run on one port");
+  sockfd = args->sockfds[0];
 
   while (1) {
     sin_size = sizeof(client_addr);
@@ -182,8 +264,8 @@ void free_thread_args(struct thread_args **thread_args_arr,
   }
 }
 
-void thread_server(int sockfd) {
-  int newsockfd, ret, max_num_threads;
+void thread_server(struct server_args *args) {
+  int sockfd, newsockfd, ret, max_num_threads;
   max_num_threads = 20;
   struct thread_args *thread_args_arr[max_num_threads];
   struct thread_args *targs;
@@ -193,6 +275,10 @@ void thread_server(int sockfd) {
 
   memset(&stats, 0, sizeof(stats));
   stats.lock = STATS_NO_LOCK;
+
+  if (args->sockfdslen != 1)
+    STDERR_RETURN_VOID("thread_server can only run on one port");
+  sockfd = args->sockfds[0];
 
   for (int i = 0; i < max_num_threads; i++) {
     thread_args_arr[i] = NULL;
@@ -263,14 +349,18 @@ void *thread_pool_run(void *_args) {
   }
 }
 
-void thread_pool_server(int sockfd) {
-  int ret;
+void thread_pool_server(struct server_args *args) {
+  int sockfd, ret;
   struct thread_pool_args *targs;
   struct thread_pool_args *targs_arr[THREAD_POOL_NUM_THREADS];
   Stats stats;
 
   memset(&stats, 0, sizeof(stats));
   stats.lock = STATS_NO_LOCK;
+
+  if (args->sockfdslen != 1)
+    STDERR_RETURN_VOID("thread_pool_server can only run on one port");
+  sockfd = args->sockfds[0];
 
   for (int i = 0; i < THREAD_POOL_NUM_THREADS; i++) {
     targs_arr[i] = targs =
@@ -309,8 +399,8 @@ void *thread_queue_consumer_run(void *args) {
   }
 }
 
-void thread_queue_server(int sockfd) {
-  int ret;
+void thread_queue_server(struct server_args *args) {
+  int sockfd, ret;
   struct thread_queue_message_body *body;
   struct thread_queue_consumer_args *targs;
   struct queue q;
@@ -319,6 +409,10 @@ void thread_queue_server(int sockfd) {
   memset(&stats, 0, sizeof(stats));
   stats.lock = STATS_NO_LOCK;
   queue_init(&q);
+
+  if (args->sockfdslen != 1)
+    STDERR_RETURN_VOID("thread_queue_server can only run on one port");
+  sockfd = args->sockfds[0];
 
   for (int i = 0; i < THREAD_QUEUE_NUM_THREADS; i++) {
     targs = (struct thread_queue_consumer_args *)malloc(sizeof(*targs));
@@ -329,8 +423,8 @@ void thread_queue_server(int sockfd) {
     targs->stats = &stats;
     targs->q = &q;
 
-    ret =
-        pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run, targs);
+    ret = pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run,
+                         targs);
     if (ret != 0) {
       close(sockfd);
       PERROR_RETURN_VOID("pthread_create");

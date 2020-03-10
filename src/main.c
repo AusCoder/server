@@ -10,8 +10,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define PORT "3711"
+//#define PORT "3711"
 #define BACKLOG 10
+#define _MAX_LISTENING_SOCKETS 32
 
 // Could run with atexit, but then the child processes can
 // remove the semaphore. For now, we run it on SIGINT
@@ -28,50 +29,26 @@ void sigchld_handler(UNUSED int s) {
 }
 
 int main(int argc, char *argv[]) {
-  int sockfd, status;
-  struct addrinfo hints, *servinfo, *p;
+  int sockfd;
   struct sigaction sa_chld, sa_int;
-  struct server_args servargs;
-  int yes = 1;
+  struct server_cli_args cliargs;
+  struct server_args args;
 
-  read_server_args(argc, argv, &servargs);
+  if (read_server_cli_args(argc, argv, &cliargs) < 0)
+    STDERR_EXIT("failed to read server cli args");
 
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE;
+  args.sockfdslen = 0;
+  args.sockfds = malloc(cliargs.portslen * sizeof(*(args.sockfds)));
+  if (args.sockfds == NULL)
+    PERROR_EXIT("malloc");
 
-  status = getaddrinfo(NULL, PORT, &hints, &servinfo);
-  if (status != 0) {
-    fprintf(stderr, "getaddrinfo() failed: %s\n", gai_strerror(status));
-    exit(EXIT_FAILURE);
+  for (size_t i = 0; i < cliargs.portslen; i++) {
+    args.sockfds[i] = sockfd = create_server_socket(cliargs.ports[i]);
+    if (sockfd < 0)
+      STDERR_EXIT("failed to create server socket");
+    args.sockfdslen++;
+    printf("created server socket on port %s\n", cliargs.ports[i]);
   }
-
-  for (p = servinfo; p != NULL; p = p->ai_next) {
-    sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-    if (sockfd == -1) {
-      perror("server: socket");
-      continue;
-    }
-
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
-      HANDLE_ERROR_EXIT("setsockopt");
-
-    if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-      close(sockfd);
-      perror("server: bind");
-      continue;
-    }
-
-    break;
-  }
-  freeaddrinfo(servinfo);
-
-  if (p == NULL)
-    STDERR_EXIT("server: failed to bind");
-
-  if (listen(sockfd, BACKLOG) == -1)
-    PERROR_EXIT("listen");
 
   sa_chld.sa_handler = sigchld_handler;
   sigemptyset(&sa_chld.sa_mask);
@@ -85,21 +62,16 @@ int main(int argc, char *argv[]) {
   if (sigaction(SIGINT, &sa_int, NULL) < 0)
     PERROR_EXIT("sigaction");
 
-  if (servargs.type == ST_SINGLE) {
-    printf("single process server: waiting for connections on port %s\n", PORT);
-    single_process_server(sockfd);
-  } else if (servargs.type == ST_FORK) {
-    printf("fork server: waiting for connections on port %s\n", PORT);
-    fork_server(sockfd);
-  } else if (servargs.type == ST_THREAD) {
-    printf("thread server: waiting for connections on port %s\n", PORT);
-    thread_server(sockfd);
-  } else if (servargs.type == ST_THREAD_POOL) {
-    printf("thread pool server: waiting for connections on port %s\n", PORT);
-    thread_pool_server(sockfd);
-  } else if (servargs.type == ST_THREAD_QUEUE) {
-    printf("thread queue server: waiting for connections on port %s\n", PORT);
-    thread_queue_server(sockfd);
+  if (cliargs.type == ST_SINGLE) {
+    single_process_server(&args);
+  } else if (cliargs.type == ST_FORK) {
+    fork_server(&args);
+  } else if (cliargs.type == ST_THREAD) {
+    thread_server(&args);
+  } else if (cliargs.type == ST_THREAD_POOL) {
+    thread_pool_server(&args);
+  } else if (cliargs.type == ST_THREAD_QUEUE) {
+    thread_queue_server(&args);
   } else {
     STDERR_EXIT("Unknown server type");
   }
