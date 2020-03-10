@@ -313,7 +313,6 @@ void thread_queue_server(int sockfd) {
   int ret;
   struct thread_queue_message_body *body;
   struct thread_queue_consumer_args *targs;
-  struct thread_queue_consumer_args *targs_arr[THREAD_QUEUE_NUM_THREADS];
   struct queue q;
   Stats stats;
 
@@ -322,7 +321,7 @@ void thread_queue_server(int sockfd) {
   queue_init(&q);
 
   for (int i = 0; i < THREAD_QUEUE_NUM_THREADS; i++) {
-    targs_arr[i] = targs = (struct thread_queue_consumer_args *)malloc(sizeof(*targs));
+    targs = (struct thread_queue_consumer_args *)malloc(sizeof(*targs));
     if (targs == NULL) {
       close(sockfd);
       PERROR_RETURN_VOID("malloc");
@@ -332,26 +331,16 @@ void thread_queue_server(int sockfd) {
 
     ret =
         pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run, targs);
-    if (ret < 0) {
+    if (ret != 0) {
       close(sockfd);
       PERROR_RETURN_VOID("pthread_create");
     }
+    ret = pthread_detach(targs->thread_id);
+    if (ret != 0) {
+      close(sockfd);
+      PERROR_RETURN_VOID("pthread_detach");
+    }
   }
-
-  //targs = (struct thread_queue_consumer_args *)malloc(sizeof(*targs));
-  //if (targs == NULL) {
-  //  close(sockfd);
-  //  PERROR_RETURN_VOID("malloc");
-  //}
-  //targs->stats = &stats;
-  //targs->q = &q;
-
-  //ret =
-  //    pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run, targs);
-  //if (ret < 0) {
-  //  close(sockfd);
-  //  PERROR_RETURN_VOID("pthread_create");
-  //}
 
   while (1) {
     body = (struct thread_queue_message_body *)malloc(sizeof(*body));

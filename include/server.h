@@ -25,7 +25,7 @@ typedef enum {
 
 #define ST_DEFAULT ST_THREAD
 
-#define THREAD_POOL_NUM_THREADS 16
+#define THREAD_POOL_NUM_THREADS 4
 
 #define THREAD_QUEUE_NUM_THREADS 4
 
