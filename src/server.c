@@ -399,10 +399,101 @@ void *thread_queue_consumer_run(void *args) {
   }
 }
 
-void thread_queue_server(struct server_args *args) {
-  int sockfd, ret;
-  struct thread_queue_message_body *body;
+static int thread_queue_start_consumers(Stats *stats, struct queue *q) {
+  int ret;
   struct thread_queue_consumer_args *targs;
+
+  for (int i = 0; i < THREAD_QUEUE_NUM_THREADS; i++) {
+    targs = (struct thread_queue_consumer_args *)malloc(sizeof(*targs));
+    if (targs == NULL)
+      PERROR_RETURN("malloc", -1);
+
+    targs->stats = stats;
+    targs->q = q;
+
+    ret = pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run,
+                         targs);
+    if (ret != 0) 
+      PERROR_RETURN("pthread_create", -1);
+    
+    ret = pthread_detach(targs->thread_id);
+    if (ret != 0)
+      PERROR_RETURN("pthread_detach", -1);
+  }
+  return 0;
+}
+
+// Might integrate this single socket listening
+#if 0
+static int thread_queue_producer_single_socket(struct queue *q, int sockfd) {
+  struct thread_queue_message_body *body;
+
+  while (1) {
+    body = (struct thread_queue_message_body *)malloc(sizeof(*body));
+    if (body == NULL)
+      PERROR_RETURN("malloc", -1);
+
+    body->addrlen = sizeof(body->client_addr);
+    body->sockfd = accept(sockfd, (struct sockaddr *)&body->client_addr,
+                          &body->addrlen);
+    if (body->sockfd < 0) {
+      perror("accept");
+      free(body);
+      continue;
+    }
+    if (queue_put(q, body) < 0)
+      STDERR_RETURN("queue_put", -1);
+  }
+}
+#endif
+
+static int thread_queue_producer(struct queue *q, struct server_args *args) {
+  int maxfd, sockfd, ret;
+  fd_set rfds;
+  struct thread_queue_message_body *body;
+
+  maxfd = 0;
+  FD_ZERO(&rfds);
+  for (size_t i = 0; i < args->sockfdslen; i++) {
+    sockfd = args->sockfds[i];
+    FD_SET(sockfd, &rfds);
+    if (sockfd > maxfd) {
+      maxfd = sockfd;
+    }
+  }
+  maxfd++;
+
+  while (1) {
+    ret = select(maxfd, &rfds, NULL, NULL, NULL);
+    if (ret < 0) {
+      PERROR_RETURN("select", -1);
+    }
+
+    for (size_t i = 0; i < args->sockfdslen; i++) {
+      sockfd = args->sockfds[i];
+      if (!FD_ISSET(sockfd, &rfds)) {
+        continue;
+      }
+      body = (struct thread_queue_message_body *)malloc(sizeof(*body));
+      if (body == NULL)
+        PERROR_RETURN("malloc", -1);
+
+      body->addrlen = sizeof(body->client_addr);
+      body->sockfd = accept(sockfd, (struct sockaddr *)&body->client_addr,
+                            &body->addrlen);
+      if (body->sockfd < 0) {
+        perror("accept");
+        free(body);
+        continue;
+      }
+      if (queue_put(q, body) < 0)
+        STDERR_RETURN("queue_put", -1);
+    }
+  }
+}
+
+void thread_queue_server(struct server_args *args) {
+  int sockfd;
   struct queue q;
   Stats stats;
 
@@ -414,44 +505,14 @@ void thread_queue_server(struct server_args *args) {
     STDERR_RETURN_VOID("thread_queue_server can only run on one port");
   sockfd = args->sockfds[0];
 
-  for (int i = 0; i < THREAD_QUEUE_NUM_THREADS; i++) {
-    targs = (struct thread_queue_consumer_args *)malloc(sizeof(*targs));
-    if (targs == NULL) {
-      close(sockfd);
-      PERROR_RETURN_VOID("malloc");
-    }
-    targs->stats = &stats;
-    targs->q = &q;
-
-    ret = pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run,
-                         targs);
-    if (ret != 0) {
-      close(sockfd);
-      PERROR_RETURN_VOID("pthread_create");
-    }
-    ret = pthread_detach(targs->thread_id);
-    if (ret != 0) {
-      close(sockfd);
-      PERROR_RETURN_VOID("pthread_detach");
-    }
+  if (thread_queue_start_consumers(&stats, &q) < 0) {
+    close(sockfd);
+    STDERR_RETURN_VOID("failed to start thread queue consumers");
   }
 
-  while (1) {
-    body = (struct thread_queue_message_body *)malloc(sizeof(*body));
-    if (body == NULL) {
-      close(sockfd);
-      PERROR_RETURN_VOID("malloc");
-    }
-
-    body->addrlen = sizeof(body->client_addr);
-    body->sockfd = accept(sockfd, (struct sockaddr *)&(body->client_addr),
-                          &(body->addrlen));
-    if (body->sockfd < 0) {
-      perror("accept");
-      free(body);
-      continue;
-    }
-    if (queue_put(&q, body) < 0)
-      STDERR_RETURN_VOID("queue_put");
+  // TODO: Add args->sockfds cleanup function
+  if (thread_queue_producer(&q, args) < 0) {
+    //close(sockfd);
+    STDERR_RETURN_VOID("failed to run thread queue producer");
   }
 }
