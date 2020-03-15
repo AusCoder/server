@@ -30,15 +30,19 @@ def capture_signals():
 
 
 def _stop_threads(sig, frame):
+    global THREADS_RUNNING
     THREADS_RUNNING = False
 
 
 def run_requests(url, delay):
     session = requests.Session()
     while THREADS_RUNNING:
-        with session.get(url, timeout=REQUEST_TIMEOUT, stream=True) as r:
-            content_len = len(r.content)
-            click.echo(f"Received response of size {content_len} bytes")
+        try:
+            with session.get(url, timeout=REQUEST_TIMEOUT, stream=True) as r:
+                content_len = len(r.content)
+                click.echo(f"Received response of size {content_len} bytes")
+        except requests.exceptions.RequestException as err:
+            print(f"Failed to make requests: {str(err)}")
         time.sleep(delay)
 
 

@@ -101,6 +101,9 @@ int create_server_socket(const char *port) {
       continue;
     }
 
+    //if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) < 0)
+    //  PERROR_RETURN("fcntl", -1);
+
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0)
       PERROR_RETURN("setsockopt", -1);
 
@@ -452,28 +455,32 @@ static int thread_queue_producer(struct queue *q, struct server_args *args) {
   fd_set rfds;
   struct thread_queue_message_body *body;
 
-  maxfd = 0;
-  FD_ZERO(&rfds);
-  for (size_t i = 0; i < args->sockfdslen; i++) {
-    sockfd = args->sockfds[i];
-    FD_SET(sockfd, &rfds);
-    if (sockfd > maxfd) {
-      maxfd = sockfd;
-    }
-  }
-  maxfd++;
-
   while (1) {
-    ret = select(maxfd, &rfds, NULL, NULL, NULL);
-    if (ret < 0) {
-      PERROR_RETURN("select", -1);
-    }
-
+    // Initialize set for select
+    maxfd = -1;
+    FD_ZERO(&rfds);
     for (size_t i = 0; i < args->sockfdslen; i++) {
       sockfd = args->sockfds[i];
-      if (!FD_ISSET(sockfd, &rfds)) {
-        continue;
+      FD_SET(sockfd, &rfds);
+      if (sockfd > maxfd) {
+        maxfd = sockfd;
       }
+    }
+    maxfd++;
+    // Run select
+    ret = select(maxfd, &rfds, NULL, NULL, NULL);
+    if (ret < 0 && errno == EINTR) {
+      fprintf(stderr, "Received signal on select. Continuing\n");
+      continue;
+    }
+    if (ret < 0)
+      PERROR_RETURN("select", -1);
+    // Accept from available sockets
+    for (size_t i = 0; i < args->sockfdslen; i++) {
+      sockfd = args->sockfds[i];
+      if (!FD_ISSET(sockfd, &rfds))
+        continue;
+
       body = (struct thread_queue_message_body *)malloc(sizeof(*body));
       if (body == NULL)
         PERROR_RETURN("malloc", -1);
@@ -493,7 +500,7 @@ static int thread_queue_producer(struct queue *q, struct server_args *args) {
 }
 
 void thread_queue_server(struct server_args *args) {
-  int sockfd;
+  //int sockfd;
   struct queue q;
   Stats stats;
 
@@ -501,12 +508,12 @@ void thread_queue_server(struct server_args *args) {
   stats.lock = STATS_NO_LOCK;
   queue_init(&q);
 
-  if (args->sockfdslen != 1)
-    STDERR_RETURN_VOID("thread_queue_server can only run on one port");
-  sockfd = args->sockfds[0];
+  //if (args->sockfdslen != 1)
+  //  STDERR_RETURN_VOID("thread_queue_server can only run on one port");
+  //sockfd = args->sockfds[0];
 
   if (thread_queue_start_consumers(&stats, &q) < 0) {
-    close(sockfd);
+    //close(sockfd);
     STDERR_RETURN_VOID("failed to start thread queue consumers");
   }
 
