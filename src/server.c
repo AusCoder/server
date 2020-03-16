@@ -48,7 +48,7 @@ int read_server_cli_args(int argc, char *const argv[],
       }
     case 'p':
       if (args->portslen >= args->portssize)
-        STDERR_RETURN("more than maximum number of ports specified", -1);
+        LOGLN_ERR_RETURN("more than maximum number of ports specified", -1);
       args->ports[args->portslen] = buf =
           malloc((strlen(optarg) + 1) * sizeof(char));
       if (buf == NULL)
@@ -101,7 +101,7 @@ int create_server_socket(const char *port) {
       continue;
     }
 
-    //if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) < 0)
+    // if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) < 0)
     //  PERROR_RETURN("fcntl", -1);
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0)
@@ -118,7 +118,7 @@ int create_server_socket(const char *port) {
   freeaddrinfo(servinfo);
 
   if (p == NULL)
-    STDERR_RETURN("failed to bind", -1);
+    LOGLN_ERR_RETURN("failed to bind", -1);
 
   if (listen(sockfd, BACKLOG) == -1)
     PERROR_RETURN("listen", -1);
@@ -136,7 +136,7 @@ void single_process_server(struct server_args *args) {
   stats.lock = STATS_NO_LOCK;
 
   if (args->sockfdslen != 1)
-    STDERR_RETURN_VOID("single_process_server can only run on one port");
+    LOGLN_ERR_RETURN_VOID("single_process_server can only run on one port");
   sockfd = args->sockfds[0];
 
   // TODO: add a log message saying the server type
@@ -150,7 +150,7 @@ void single_process_server(struct server_args *args) {
 
     if (handle(&stats, newsockfd, (struct sockaddr *)&client_addr, sin_size) <
         0)
-      fprintf(stderr, HANDLE_ERR_MSG);
+      LOG_ERR("%s\n", HANDLE_ERR_MSG);
     close(newsockfd);
   }
 }
@@ -165,7 +165,7 @@ void fork_server(struct server_args *args) {
   stats_ipc = (Stats *)mmap(NULL, sizeof(Stats), PROT_READ | PROT_WRITE,
                             MAP_SHARED | MAP_ANONYMOUS, -1, 0);
   if (stats_ipc == MAP_FAILED)
-    HANDLE_ERROR_RETURN_VOID("mmap");
+    LOGLN_ERR_RETURN_VOID("mmap");
 
   memset(stats_ipc, 0, sizeof(Stats));
 
@@ -185,10 +185,10 @@ void fork_server(struct server_args *args) {
   // semaphore to lock stats
   stats_ipc->lock = sem_open(SEM_NAME, O_CREAT | O_EXCL, O_RDWR, 1);
   if (stats_ipc->lock == SEM_FAILED)
-    HANDLE_ERROR_RETURN_VOID("sem_open");
+    LOGLN_ERR_RETURN_VOID("sem_open");
 
   if (args->sockfdslen != 1)
-    STDERR_RETURN_VOID("fork_server can only run on one port");
+    LOGLN_ERR_RETURN_VOID("fork_server can only run on one port");
   sockfd = args->sockfds[0];
 
   while (1) {
@@ -280,7 +280,7 @@ void thread_server(struct server_args *args) {
   stats.lock = STATS_NO_LOCK;
 
   if (args->sockfdslen != 1)
-    STDERR_RETURN_VOID("thread_server can only run on one port");
+    LOGLN_ERR_RETURN_VOID("thread_server can only run on one port");
   sockfd = args->sockfds[0];
 
   for (int i = 0; i < max_num_threads; i++) {
@@ -323,7 +323,7 @@ void thread_server(struct server_args *args) {
     ret = pthread_create(&(targs->thread_id), NULL, thread_run, targs);
     if (ret != 0) {
       free_thread_args(thread_args_arr, max_num_threads);
-      HANDLE_ERROR_RETURN_VOID("pthread_create");
+      LOGLN_ERR_RETURN_VOID("pthread_create");
     }
 
     free_thread_args(thread_args_arr, max_num_threads);
@@ -362,7 +362,7 @@ void thread_pool_server(struct server_args *args) {
   stats.lock = STATS_NO_LOCK;
 
   if (args->sockfdslen != 1)
-    STDERR_RETURN_VOID("thread_pool_server can only run on one port");
+    LOGLN_ERR_RETURN_VOID("thread_pool_server can only run on one port");
   sockfd = args->sockfds[0];
 
   for (int i = 0; i < THREAD_POOL_NUM_THREADS; i++) {
@@ -391,7 +391,7 @@ void *thread_queue_consumer_run(void *args) {
   while (1) {
     body = queue_get(targs->q);
     if (body == NULL)
-      STDERR_RETURN("queue_get", NULL);
+      LOGLN_ERR_RETURN("queue_get", NULL);
 
     if (handle(targs->stats, body->sockfd,
                (struct sockaddr *)&(body->client_addr), body->addrlen) < 0)
@@ -416,9 +416,9 @@ static int thread_queue_start_consumers(Stats *stats, struct queue *q) {
 
     ret = pthread_create(&targs->thread_id, NULL, thread_queue_consumer_run,
                          targs);
-    if (ret != 0) 
+    if (ret != 0)
       PERROR_RETURN("pthread_create", -1);
-    
+
     ret = pthread_detach(targs->thread_id);
     if (ret != 0)
       PERROR_RETURN("pthread_detach", -1);
@@ -445,7 +445,7 @@ static int thread_queue_producer_single_socket(struct queue *q, int sockfd) {
       continue;
     }
     if (queue_put(q, body) < 0)
-      STDERR_RETURN("queue_put", -1);
+      LOGLN_ERR_RETURN("queue_put", -1);
   }
 }
 #endif
@@ -465,6 +465,7 @@ static int thread_queue_producer(struct queue *q, struct server_args *args) {
       if (sockfd > maxfd) {
         maxfd = sockfd;
       }
+      LOG_INFO("Adding socket to watch set: %d\n", sockfd);
     }
     maxfd++;
     // Run select
@@ -486,21 +487,21 @@ static int thread_queue_producer(struct queue *q, struct server_args *args) {
         PERROR_RETURN("malloc", -1);
 
       body->addrlen = sizeof(body->client_addr);
-      body->sockfd = accept(sockfd, (struct sockaddr *)&body->client_addr,
-                            &body->addrlen);
+      body->sockfd =
+          accept(sockfd, (struct sockaddr *)&body->client_addr, &body->addrlen);
       if (body->sockfd < 0) {
         perror("accept");
         free(body);
         continue;
       }
       if (queue_put(q, body) < 0)
-        STDERR_RETURN("queue_put", -1);
+        LOGLN_ERR_RETURN("queue_put", -1);
     }
   }
 }
 
 void thread_queue_server(struct server_args *args) {
-  //int sockfd;
+  // int sockfd;
   struct queue q;
   Stats stats;
 
@@ -508,18 +509,18 @@ void thread_queue_server(struct server_args *args) {
   stats.lock = STATS_NO_LOCK;
   queue_init(&q);
 
-  //if (args->sockfdslen != 1)
-  //  STDERR_RETURN_VOID("thread_queue_server can only run on one port");
-  //sockfd = args->sockfds[0];
+  // if (args->sockfdslen != 1)
+  //  LOGLN_ERR_RETURN_VOID("thread_queue_server can only run on one port");
+  // sockfd = args->sockfds[0];
 
   if (thread_queue_start_consumers(&stats, &q) < 0) {
-    //close(sockfd);
-    STDERR_RETURN_VOID("failed to start thread queue consumers");
+    // close(sockfd);
+    LOGLN_ERR_RETURN_VOID("failed to start thread queue consumers");
   }
 
   // TODO: Add args->sockfds cleanup function
   if (thread_queue_producer(&q, args) < 0) {
-    //close(sockfd);
-    STDERR_RETURN_VOID("failed to run thread queue producer");
+    // close(sockfd);
+    LOGLN_ERR_RETURN_VOID("failed to run thread queue producer");
   }
 }

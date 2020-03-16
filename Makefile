@@ -8,10 +8,10 @@ TEST_LDLIBS = -pthread -lcheck
 
 all: server client showip
 
-server: obj/main.o obj/server.o obj/handler.o obj/queue.o
+server: obj/main.o obj/server.o obj/common.o obj/handler.o obj/queue.o
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
-check: obj-tests/main.o obj-tests/test-queue.o obj/queue.o
+check: obj-tests/main.o obj-tests/test-queue.o obj/common.o obj/queue.o
 	$(CC) $(LDFLAGS) $^ $(TEST_LDLIBS) -o $@
 
 client: obj/client.o

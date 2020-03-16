@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
   struct server_args args;
 
   if (read_server_cli_args(argc, argv, &cliargs) < 0)
-    STDERR_EXIT("failed to read server cli args");
+    LOGLN_ERR_EXIT("failed to read server cli args");
 
   args.sockfdslen = 0;
   args.sockfds = malloc(cliargs.portslen * sizeof(*(args.sockfds)));
@@ -45,7 +45,7 @@ int main(int argc, char *argv[]) {
   for (size_t i = 0; i < cliargs.portslen; i++) {
     args.sockfds[i] = sockfd = create_server_socket(cliargs.ports[i]);
     if (sockfd < 0)
-      STDERR_EXIT("failed to create server socket");
+      LOGLN_ERR_EXIT("failed to create server socket");
     args.sockfdslen++;
     printf("created server socket on port %s\n", cliargs.ports[i]);
   }
@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
   } else if (cliargs.type == ST_THREAD_QUEUE) {
     thread_queue_server(&args);
   } else {
-    STDERR_EXIT("Unknown server type");
+    LOGLN_ERR_EXIT("Unknown server type");
   }
   return 0;
 }

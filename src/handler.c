@@ -81,10 +81,10 @@ int read_request(int sockfd, Request *req) {
 
     tmpscanbuf = memchr(scanbuf, ' ', scan_numbytes);
     if (tmpscanbuf == NULL)
-      STDERR_RETURN("memchr method", -1); // TODO should be a stderr error
+      LOGLN_ERR_RETURN("memchr method", -1); // TODO should be a stderr error
     // need an enum for handling errors
     if (memcmp(STR_GET, scanbuf, STR_GET_LEN) != 0)
-      STDERR_RETURN("not a get request", -1);
+      LOGLN_ERR_RETURN("not a get request", -1);
     req->method = METHOD_GET;
 
     // Should check if scan_bytes is negative here
@@ -95,7 +95,7 @@ int read_request(int sockfd, Request *req) {
     // This should error for really long uris
     // maybe we need a continue
     if (tmpscanbuf == NULL)
-      STDERR_RETURN("memchr uri", -1);
+      LOGLN_ERR_RETURN("memchr uri", -1);
 
     *tmpscanbuf = '\0';
     req->uri = (char *)malloc(sizeof(char) * (tmpscanbuf + 1 - scanbuf));
@@ -106,16 +106,16 @@ int read_request(int sockfd, Request *req) {
 
     tmpscanbuf = memchr(scanbuf, '\n', scan_numbytes);
     if (tmpscanbuf == NULL)
-      STDERR_RETURN("memchr httpv", -1); // maybe this should continue?
+      LOGLN_ERR_RETURN("memchr httpv", -1); // maybe this should continue?
     if (*(tmpscanbuf - 1) != '\r')
-      STDERR_RETURN("bad carriage return", -1);
+      LOGLN_ERR_RETURN("bad carriage return", -1);
 
     if (memcmp(STR_HTTP10, scanbuf, STR_HTTP10_LEN) == 0) {
       req->httpv = HTTPV10;
     } else if (memcmp(STR_HTTP11, scanbuf, STR_HTTP11_LEN) == 0) {
       req->httpv = HTTPV11;
     } else {
-      STDERR_RETURN("httpv", -1);
+      LOGLN_ERR_RETURN("httpv", -1);
     }
     scan_numbytes -= tmpscanbuf + 1 - scanbuf;
     scanbuf = tmpscanbuf + 1;
