@@ -18,7 +18,7 @@ int read_server_cli_args(int argc, char *const argv[],
 
   args->ports = malloc(MAX_LISTENING_PORTS * sizeof(char *));
   if (args->ports == NULL)
-    PERROR_RETURN("malloc", -1);
+    LOGLN_ERRNO_RETURN("malloc", -1);
   args->portssize = MAX_LISTENING_PORTS;
   args->portslen = 0;
 
@@ -70,7 +70,7 @@ int read_server_cli_args(int argc, char *const argv[],
     args->ports[args->portslen] = buf =
         malloc((strlen(DEFAULT_PORT) + 1) * sizeof(char));
     if (buf == NULL)
-      PERROR_RETURN("malloc", -1);
+      LOGLN_ERRNO_RETURN("malloc", -1);
     strcpy(buf, DEFAULT_PORT);
     args->portslen++;
   }
@@ -90,14 +90,14 @@ int create_server_socket(const char *port) {
 
   status = getaddrinfo(NULL, port, &hints, &servinfo);
   if (status != 0) {
-    fprintf(stderr, "getaddrinfo() failed: %s\n", gai_strerror(status));
+    LOG_ERR("getaddrinfo() failed: %s\n", gai_strerror(status));
     return -1;
   }
 
   for (p = servinfo; p != NULL; p = p->ai_next) {
     sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
     if (sockfd < 0) {
-      perror("socket");
+      LOGLN_ERRNO("socket");
       continue;
     }
 
@@ -105,11 +105,11 @@ int create_server_socket(const char *port) {
     //  PERROR_RETURN("fcntl", -1);
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0)
-      PERROR_RETURN("setsockopt", -1);
+      LOGLN_ERRNO_RETURN("setsockopt", -1);
 
     if (bind(sockfd, p->ai_addr, p->ai_addrlen) < 0) {
       close(sockfd);
-      perror("bind");
+      LOGLN_ERRNO("bind");
       continue;
     }
 
@@ -121,7 +121,7 @@ int create_server_socket(const char *port) {
     LOGLN_ERR_RETURN("failed to bind", -1);
 
   if (listen(sockfd, BACKLOG) == -1)
-    PERROR_RETURN("listen", -1);
+    LOGLN_ERRNO_RETURN("listen", -1);
 
   return sockfd;
 }

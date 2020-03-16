@@ -14,12 +14,23 @@ int set_log_lvl(int lvl);
 
 #define LOG(lvl, fmt, ...)                                                     \
   do {                                                                         \
-    if (lvl > GLOBAL_log_lvl)                                                  \
+    if ((lvl) > GLOBAL_log_lvl)                                                \
       break;                                                                   \
-    if (lvl <= LOG_LVL_WARN)                                                   \
-      fprintf(stderr, fmt, __VA_ARGS__);                                       \
-    else                                                                       \
-      fprintf(stdout, fmt, __VA_ARGS__);                                       \
+    if ((lvl) <= LOG_LVL_WARN) {                                               \
+      if ((lvl) == LOG_LVL_ERR) {                                              \
+        fprintf(stderr, "[error] ");                                           \
+      } else if ((lvl) == LOG_LVL_WARN) {                                      \
+        fprintf(stderr, "[warn] ");                                            \
+      }                                                                        \
+      fprintf(stderr, (fmt), __VA_ARGS__);                                     \
+    } else {                                                                   \
+      if ((lvl) == LOG_LVL_INFO) {                                             \
+        fprintf(stdout, "[info] ");                                            \
+      } else if ((lvl) == LOG_LVL_DEBUG) {                                     \
+        fprintf(stdout, "[debug] ");                                           \
+      }                                                                        \
+      fprintf(stdout, (fmt), __VA_ARGS__);                                     \
+    }                                                                          \
   } while (0)
 
 #define LOG_ERR(fmt, ...) LOG(LOG_LVL_ERR, fmt, __VA_ARGS__)
@@ -32,6 +43,23 @@ int set_log_lvl(int lvl);
 #define LOGLN_WARN(msg) LOG_WARN("%s\n", msg)
 #define LOGLN_INFO(msg) LOG_INFO("%s\n", msg)
 #define LOGLN_DEBUG(msg) LOG_DEBUG("%s\n", msg)
+
+// Log current errno
+#define LOGLN_ERRNO(msg) LOG_ERR("%s: %s\n", msg, strerror(errno))
+// Log an error num argument
+#define LOGLN_ERRNOA(msg, en) LOG_ERR("%s: %s\n", msg, strerror(en))
+
+#define LOGLN_ERRNO_RETURN(msg, ret)                                                \
+  do {                                                                         \
+    LOGLN_ERRNO(msg);                                                               \
+    return ret;                                                                \
+  } while (0)
+
+#define LOGLN_ERRNO_RETURN_VOID(msg)                                                \
+  do {                                                                         \
+    LOGLN_ERRNO(msg);                                                               \
+    return;                                                                    \
+  } while (0)
 
 #define LOGLN_ERR_EXIT(msg)                                                    \
   do {                                                                         \
@@ -51,6 +79,7 @@ int set_log_lvl(int lvl);
     return;                                                                    \
   } while (0)
 
+// Old macros
 #define PERROR_EXIT(msg)                                                       \
   do {                                                                         \
     perror(msg);                                                               \

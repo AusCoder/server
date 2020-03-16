@@ -34,6 +34,9 @@ int main(int argc, char *argv[]) {
   struct server_cli_args cliargs;
   struct server_args args;
 
+  LOGLN_ERRNOA("abc", errno);
+  LOGLN_ERR("abc");
+
   if (read_server_cli_args(argc, argv, &cliargs) < 0)
     LOGLN_ERR_EXIT("failed to read server cli args");
 
