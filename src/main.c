@@ -10,10 +10,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-//#define PORT "3711"
-#define BACKLOG 10
-#define _MAX_LISTENING_SOCKETS 32
-
 // Could run with atexit, but then the child processes can
 // remove the semaphore. For now, we run it on SIGINT
 void sigint_handler(UNUSED int s) {
@@ -29,13 +25,12 @@ void sigchld_handler(UNUSED int s) {
 }
 
 int main(int argc, char *argv[]) {
-  int sockfd;
+  int sockfd, is_non_blocking;
   struct sigaction sa_chld, sa_int;
   struct server_cli_args cliargs;
   struct server_args args;
 
-  LOGLN_ERRNOA("abc", errno);
-  LOGLN_ERR("abc");
+  set_log_lvl(LOG_LVL_DEBUG);
 
   if (read_server_cli_args(argc, argv, &cliargs) < 0)
     LOGLN_ERR_EXIT("failed to read server cli args");
@@ -45,12 +40,19 @@ int main(int argc, char *argv[]) {
   if (args.sockfds == NULL)
     PERROR_EXIT("malloc");
 
+  if (cliargs.type == ST_THREAD_QUEUE) {
+    is_non_blocking = 1;
+  } else {
+    is_non_blocking = 0;
+  }
+
   for (size_t i = 0; i < cliargs.portslen; i++) {
-    args.sockfds[i] = sockfd = create_server_socket(cliargs.ports[i]);
+    args.sockfds[i] = sockfd =
+        create_server_socket(cliargs.ports[i], is_non_blocking);
     if (sockfd < 0)
       LOGLN_ERR_EXIT("failed to create server socket");
     args.sockfdslen++;
-    printf("created server socket on port %s\n", cliargs.ports[i]);
+    LOG_INFO("created server socket on port %s\n", cliargs.ports[i]);
   }
 
   sa_chld.sa_handler = sigchld_handler;

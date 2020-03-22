@@ -27,6 +27,7 @@
 #define BACKLOG 10
 
 #define ERR_SELECT_INTERRUPTED -10
+#define ERR_ACCEPT_WOULD_BLOCK -11
 
 typedef enum {
   ST_SINGLE,
@@ -52,7 +53,8 @@ struct server_args {
   size_t sockfdslen;
 };
 
-int create_server_socket(const char *port);
+int create_server_socket(const char *port, int is_non_blocking);
+int close_server_sockets(struct server_args *args);
 
 /* Single process server
  * Processes one request at a time

@@ -78,7 +78,7 @@ int read_server_cli_args(int argc, char *const argv[],
   return 0;
 }
 
-int create_server_socket(const char *port) {
+int create_server_socket(const char *port, int is_non_blocking) {
   int sockfd, status;
   struct addrinfo hints, *servinfo, *p;
   int yes = 1;
@@ -101,8 +101,9 @@ int create_server_socket(const char *port) {
       continue;
     }
 
-    // if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) < 0)
-    //  PERROR_RETURN("fcntl", -1);
+    if (is_non_blocking &&
+        fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK) < 0)
+      LOGLN_ERRNO_RETURN("fcntl", -1);
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0)
       LOGLN_ERRNO_RETURN("setsockopt", -1);
@@ -124,6 +125,13 @@ int create_server_socket(const char *port) {
     LOGLN_ERRNO_RETURN("listen", -1);
 
   return sockfd;
+}
+
+int close_server_sockets(struct server_args *args) {
+  for (size_t i = 0; i < args->sockfdslen; i++) {
+    close(args->sockfds[i]);
+  }
+  return 0;
 }
 
 void single_process_server(struct server_args *args) {
@@ -468,7 +476,6 @@ static int accept_next(int *sockfds, size_t sockfdslen,
     if (sockfd > maxfd) {
       maxfd = sockfd;
     }
-    LOG_INFO("Adding socket to watch set: %d\n", sockfd);
   }
   maxfd++;
 
@@ -482,6 +489,8 @@ static int accept_next(int *sockfds, size_t sockfdslen,
     sockfd = sockfds[i];
     if (FD_ISSET(sockfd, &rfds)) {
       ret = accept(sockfd, client_addr, addrlen);
+      if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        LOGLN_ERR_RETURN("accept would block", ERR_ACCEPT_WOULD_BLOCK);
       if (ret < 0)
         LOGLN_ERRNO_RETURN("accept", -1);
       return ret;
@@ -505,6 +514,10 @@ static int thread_queue_producer(struct queue *q, struct server_args *args) {
       free(body);
       continue;
     }
+    if (body->sockfd == ERR_ACCEPT_WOULD_BLOCK) {
+      free(body);
+      continue;
+    }
     if (body->sockfd < 0) {
       free(body);
       LOGLN_ERR_RETURN("failed to accept socket", -1);
@@ -515,7 +528,6 @@ static int thread_queue_producer(struct queue *q, struct server_args *args) {
 }
 
 void thread_queue_server(struct server_args *args) {
-  // int sockfd;
   struct queue q;
   Stats stats;
 
@@ -523,18 +535,13 @@ void thread_queue_server(struct server_args *args) {
   stats.lock = STATS_NO_LOCK;
   queue_init(&q);
 
-  // if (args->sockfdslen != 1)
-  //  LOGLN_ERR_RETURN_VOID("thread_queue_server can only run on one port");
-  // sockfd = args->sockfds[0];
-
   if (thread_queue_start_consumers(&stats, &q) < 0) {
-    // close(sockfd);
+    close_server_sockets(args);
     LOGLN_ERR_RETURN_VOID("failed to start thread queue consumers");
   }
 
-  // TODO: Add args->sockfds cleanup function
   if (thread_queue_producer(&q, args) < 0) {
-    // close(sockfd);
+    close_server_sockets(args);
     LOGLN_ERR_RETURN_VOID("failed to run thread queue producer");
   }
 }
