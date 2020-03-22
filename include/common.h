@@ -49,15 +49,15 @@ int set_log_lvl(int lvl);
 // Log an error num argument
 #define LOGLN_ERRNOA(msg, en) LOG_ERR("%s: %s\n", msg, strerror(en))
 
-#define LOGLN_ERRNO_RETURN(msg, ret)                                                \
+#define LOGLN_ERRNO_RETURN(msg, ret)                                           \
   do {                                                                         \
-    LOGLN_ERRNO(msg);                                                               \
+    LOGLN_ERRNO(msg);                                                          \
     return ret;                                                                \
   } while (0)
 
-#define LOGLN_ERRNO_RETURN_VOID(msg)                                                \
+#define LOGLN_ERRNO_RETURN_VOID(msg)                                           \
   do {                                                                         \
-    LOGLN_ERRNO(msg);                                                               \
+    LOGLN_ERRNO(msg);                                                          \
     return;                                                                    \
   } while (0)
 

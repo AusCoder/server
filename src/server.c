@@ -450,53 +450,67 @@ static int thread_queue_producer_single_socket(struct queue *q, int sockfd) {
 }
 #endif
 
-static int thread_queue_producer(struct queue *q, struct server_args *args) {
+/**
+ * Accepts and returns the next socket available with a connection.
+ * Returns ERR_SELECT_INTERRUPTED if select was interrupted by a
+ * signal.
+ */
+static int accept_next(int *sockfds, size_t sockfdslen,
+                       struct sockaddr *client_addr, socklen_t *addrlen) {
   int maxfd, sockfd, ret;
   fd_set rfds;
-  struct thread_queue_message_body *body;
 
-  while (1) {
-    // Initialize set for select
-    maxfd = -1;
-    FD_ZERO(&rfds);
-    for (size_t i = 0; i < args->sockfdslen; i++) {
-      sockfd = args->sockfds[i];
-      FD_SET(sockfd, &rfds);
-      if (sockfd > maxfd) {
-        maxfd = sockfd;
-      }
-      LOG_INFO("Adding socket to watch set: %d\n", sockfd);
+  maxfd = -1;
+  FD_ZERO(&rfds);
+  for (size_t i = 0; i < sockfdslen; i++) {
+    sockfd = sockfds[i];
+    FD_SET(sockfd, &rfds);
+    if (sockfd > maxfd) {
+      maxfd = sockfd;
     }
-    maxfd++;
-    // Run select
-    ret = select(maxfd, &rfds, NULL, NULL, NULL);
-    if (ret < 0 && errno == EINTR) {
-      fprintf(stderr, "Received signal on select. Continuing\n");
+    LOG_INFO("Adding socket to watch set: %d\n", sockfd);
+  }
+  maxfd++;
+
+  ret = select(maxfd, &rfds, NULL, NULL, NULL);
+  if (ret < 0 && errno == EINTR)
+    LOGLN_ERR_RETURN("received signal on select", ERR_SELECT_INTERRUPTED);
+  if (ret < 0)
+    LOGLN_ERRNO_RETURN("select", -1);
+
+  for (size_t i = 0; i < sockfdslen; i++) {
+    sockfd = sockfds[i];
+    if (FD_ISSET(sockfd, &rfds)) {
+      ret = accept(sockfd, client_addr, addrlen);
+      if (ret < 0)
+        LOGLN_ERRNO_RETURN("accept", -1);
+      return ret;
+    }
+  }
+  LOGLN_ERR_RETURN("failed to find socket for read", -1);
+}
+
+static int thread_queue_producer(struct queue *q, struct server_args *args) {
+  struct thread_queue_message_body *body;
+  while (1) {
+    body = (struct thread_queue_message_body *)malloc(sizeof(*body));
+    if (body == NULL)
+      LOGLN_ERRNO_RETURN("malloc", -1);
+
+    body->addrlen = sizeof(body->client_addr);
+    body->sockfd =
+        accept_next(args->sockfds, args->sockfdslen,
+                    (struct sockaddr *)&body->client_addr, &body->addrlen);
+    if (body->sockfd == ERR_SELECT_INTERRUPTED) {
+      free(body);
       continue;
     }
-    if (ret < 0)
-      PERROR_RETURN("select", -1);
-    // Accept from available sockets
-    for (size_t i = 0; i < args->sockfdslen; i++) {
-      sockfd = args->sockfds[i];
-      if (!FD_ISSET(sockfd, &rfds))
-        continue;
-
-      body = (struct thread_queue_message_body *)malloc(sizeof(*body));
-      if (body == NULL)
-        PERROR_RETURN("malloc", -1);
-
-      body->addrlen = sizeof(body->client_addr);
-      body->sockfd =
-          accept(sockfd, (struct sockaddr *)&body->client_addr, &body->addrlen);
-      if (body->sockfd < 0) {
-        perror("accept");
-        free(body);
-        continue;
-      }
-      if (queue_put(q, body) < 0)
-        LOGLN_ERR_RETURN("queue_put", -1);
+    if (body->sockfd < 0) {
+      free(body);
+      LOGLN_ERR_RETURN("failed to accept socket", -1);
     }
+    if (queue_put(q, body) < 0)
+      LOGLN_ERR_RETURN("queue_put", -1);
   }
 }
 

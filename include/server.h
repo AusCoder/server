@@ -26,6 +26,8 @@
 
 #define BACKLOG 10
 
+#define ERR_SELECT_INTERRUPTED -10
+
 typedef enum {
   ST_SINGLE,
   ST_FORK,
